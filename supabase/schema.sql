@@ -24,6 +24,15 @@ create table if not exists public.recovery_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.rest_periods (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  workout_id uuid not null references public.workout_logs(id) on delete cascade,
+  duration_seconds integer not null check (duration_seconds > 0),
+  interval_order integer not null check (interval_order > 0),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.daily_checkins (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -37,11 +46,14 @@ create table if not exists public.daily_checkins (
 );
 
 alter table public.workout_logs enable row level security;
+alter table public.rest_periods enable row level security;
 alter table public.recovery_logs enable row level security;
 alter table public.daily_checkins enable row level security;
 
 drop policy if exists "Users can read their workout logs" on public.workout_logs;
 drop policy if exists "Users can add their workout logs" on public.workout_logs;
+drop policy if exists "Users can read their rest periods" on public.rest_periods;
+drop policy if exists "Users can add their rest periods" on public.rest_periods;
 drop policy if exists "Users can read their recovery logs" on public.recovery_logs;
 drop policy if exists "Users can add their recovery logs" on public.recovery_logs;
 drop policy if exists "Users can read their check-ins" on public.daily_checkins;
@@ -54,6 +66,22 @@ create policy "Users can read their workout logs"
 create policy "Users can add their workout logs"
   on public.workout_logs for insert
   with check (auth.uid() = user_id);
+
+create policy "Users can read their rest periods"
+  on public.rest_periods for select
+  using (auth.uid() = user_id);
+
+create policy "Users can add their rest periods"
+  on public.rest_periods for insert
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.workout_logs
+      where workout_logs.id = rest_periods.workout_id
+        and workout_logs.user_id = auth.uid()
+    )
+  );
 
 create policy "Users can read their recovery logs"
   on public.recovery_logs for select
@@ -72,5 +100,7 @@ create policy "Users can add their check-ins"
   with check (auth.uid() = user_id);
 
 create index if not exists workout_logs_user_created_idx on public.workout_logs (user_id, created_at desc);
+create index if not exists rest_periods_user_created_idx on public.rest_periods (user_id, created_at desc);
+create index if not exists rest_periods_workout_order_idx on public.rest_periods (workout_id, interval_order);
 create index if not exists recovery_logs_user_created_idx on public.recovery_logs (user_id, created_at desc);
 create index if not exists daily_checkins_user_created_idx on public.daily_checkins (user_id, created_at desc);

@@ -11,6 +11,15 @@ export type WorkoutLog = {
   created_at: string;
 };
 
+export type RestPeriod = {
+  id: string;
+  user_id: string;
+  workout_id: string;
+  duration_seconds: number;
+  interval_order: number;
+  created_at: string;
+};
+
 export type RecoveryLog = {
   id: string;
   user_id: string;

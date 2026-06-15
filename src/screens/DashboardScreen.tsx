@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
-import { DailyCheckIn, RecoveryLog, TabKey, WorkoutLog } from "../types/logs";
+import { DailyCheckIn, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "home", label: "Home" },
@@ -31,12 +31,14 @@ const forgeTips = [
 
 type DashboardData = {
   workouts: WorkoutLog[];
+  restPeriods: RestPeriod[];
   recovery: RecoveryLog[];
   checkins: DailyCheckIn[];
 };
 
 const emptyData: DashboardData = {
   workouts: [],
+  restPeriods: [],
   recovery: [],
   checkins: []
 };
@@ -46,28 +48,33 @@ export function DashboardScreen({ session }: { session: Session }) {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const loadData = useCallback(async () => {
     setRefreshing(true);
     const since = new Date();
     since.setDate(since.getDate() - 7);
 
-    const [workouts, recovery, checkins] = await Promise.all([
+    const [workouts, restPeriods, recovery, checkins] = await Promise.all([
       supabase.from("workout_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("rest_periods").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
       supabase.from("recovery_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
       supabase.from("daily_checkins").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false })
     ]);
 
     setRefreshing(false);
 
-    const firstError = workouts.error || recovery.error || checkins.error;
+    const firstError = workouts.error || restPeriods.error || recovery.error || checkins.error;
     if (firstError) {
+      setErrorMessage(firstError.message);
       Alert.alert("Could not load logs", firstError.message);
       return;
     }
 
+    setErrorMessage("");
     setData({
       workouts: (workouts.data ?? []) as WorkoutLog[],
+      restPeriods: (restPeriods.data ?? []) as RestPeriod[],
       recovery: (recovery.data ?? []) as RecoveryLog[],
       checkins: (checkins.data ?? []) as DailyCheckIn[]
     });
@@ -92,11 +99,66 @@ export function DashboardScreen({ session }: { session: Session }) {
     setSaving(false);
 
     if (error) {
+      setErrorMessage(error.message);
       Alert.alert("Save failed", error.message);
       return false;
     }
 
+    setErrorMessage("");
     Alert.alert("Logged", forgeTips[Math.floor(Math.random() * forgeTips.length)]);
+    await loadData();
+    return true;
+  }
+
+  async function saveWorkout(values: {
+    exercise: string;
+    sets: number;
+    reps: number;
+    weight: number;
+    notes: string | null;
+    restDurations: number[];
+  }) {
+    setSaving(true);
+    const { data: workout, error: workoutError } = await supabase
+      .from("workout_logs")
+      .insert({
+        user_id: session.user.id,
+        exercise: values.exercise,
+        sets: values.sets,
+        reps: values.reps,
+        weight: values.weight,
+        notes: values.notes
+      })
+      .select("id")
+      .single();
+
+    if (workoutError) {
+      setSaving(false);
+      setErrorMessage(workoutError.message);
+      Alert.alert("Workout save failed", workoutError.message);
+      return false;
+    }
+
+    if (values.restDurations.length > 0) {
+      const restRows = values.restDurations.map((duration, index) => ({
+        user_id: session.user.id,
+        workout_id: workout.id,
+        duration_seconds: duration,
+        interval_order: index + 1
+      }));
+      const { error: restError } = await supabase.from("rest_periods").insert(restRows);
+
+      if (restError) {
+        setSaving(false);
+        setErrorMessage(restError.message);
+        Alert.alert("Rest timer save failed", restError.message);
+        return false;
+      }
+    }
+
+    setSaving(false);
+    setErrorMessage("");
+    Alert.alert("Workout logged", forgeTips[Math.floor(Math.random() * forgeTips.length)]);
     await loadData();
     return true;
   }
@@ -117,8 +179,14 @@ export function DashboardScreen({ session }: { session: Session }) {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} tintColor={colors.accent} />}
       >
+        {errorMessage ? (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorTitle}>Supabase error</Text>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </View>
+        ) : null}
         {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} /> : null}
-        {activeTab === "workout" ? <WorkoutForm saving={saving} saveRow={saveRow} /> : null}
+        {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
         {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
         {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
         {activeTab === "stats" ? <StatsPanel stats={stats} /> : null}
@@ -148,6 +216,7 @@ function Home({ stats, setActiveTab }: { stats: ReturnType<typeof buildStats>; s
         <StatCard label="Volume" value={`${stats.volume} lb`} />
         <StatCard label="Sauna" value={`${stats.saunaMinutes} min`} />
         <StatCard label="Cold" value={`${stats.plungeMinutes} min`} />
+        <StatCard label="Avg rest" value={stats.avgRestTime} />
       </View>
       <Card>
         <Text style={styles.cardTitle}>Today</Text>
@@ -164,16 +233,57 @@ function Home({ stats, setActiveTab }: { stats: ReturnType<typeof buildStats>; s
 
 function WorkoutForm({
   saving,
-  saveRow
+  saveWorkout
 }: {
   saving: boolean;
-  saveRow: (table: string, values: Record<string, string | number | null>) => Promise<boolean>;
+  saveWorkout: (values: {
+    exercise: string;
+    sets: number;
+    reps: number;
+    weight: number;
+    notes: string | null;
+    restDurations: number[];
+  }) => Promise<boolean>;
 }) {
   const [exercise, setExercise] = useState("");
   const [sets, setSets] = useState("");
   const [reps, setReps] = useState("");
   const [weight, setWeight] = useState("");
   const [notes, setNotes] = useState("");
+  const [restDurations, setRestDurations] = useState<number[]>([]);
+  const [restStartedAt, setRestStartedAt] = useState<number | null>(null);
+  const [elapsedRestSeconds, setElapsedRestSeconds] = useState(0);
+  const isResting = restStartedAt !== null;
+  const workoutAverageRest = averageSeconds(restDurations);
+
+  useEffect(() => {
+    if (!restStartedAt) {
+      return;
+    }
+
+    setElapsedRestSeconds(Math.max(0, Math.floor((Date.now() - restStartedAt) / 1000)));
+    const interval = setInterval(() => {
+      setElapsedRestSeconds(Math.max(0, Math.floor((Date.now() - restStartedAt) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [restStartedAt]);
+
+  function startRest() {
+    setRestStartedAt(Date.now());
+    setElapsedRestSeconds(0);
+  }
+
+  function stopRest() {
+    if (!restStartedAt) {
+      return;
+    }
+
+    const duration = Math.max(1, Math.floor((Date.now() - restStartedAt) / 1000));
+    setRestDurations((current) => [...current, duration]);
+    setRestStartedAt(null);
+    setElapsedRestSeconds(0);
+  }
 
   async function submit() {
     if (!exercise.trim() || !positiveNumber(sets) || !positiveNumber(reps) || Number(weight || 0) < 0) {
@@ -181,12 +291,18 @@ function WorkoutForm({
       return;
     }
 
-    const saved = await saveRow("workout_logs", {
+    const finalRestDurations = [...restDurations];
+    if (restStartedAt) {
+      finalRestDurations.push(Math.max(1, Math.floor((Date.now() - restStartedAt) / 1000)));
+    }
+
+    const saved = await saveWorkout({
       exercise: exercise.trim(),
       sets: Number(sets),
       reps: Number(reps),
       weight: Number(weight || 0),
-      notes: notes.trim() || null
+      notes: notes.trim() || null,
+      restDurations: finalRestDurations
     });
 
     if (saved) {
@@ -195,6 +311,9 @@ function WorkoutForm({
       setReps("");
       setWeight("");
       setNotes("");
+      setRestDurations([]);
+      setRestStartedAt(null);
+      setElapsedRestSeconds(0);
     }
   }
 
@@ -209,6 +328,47 @@ function WorkoutForm({
         </View>
         <Field label="Weight" keyboardType="decimal-pad" onChangeText={setWeight} value={weight} placeholder="225" />
         <Field label="Notes" multiline onChangeText={setNotes} value={notes} placeholder="Depth felt clean." />
+        <View style={styles.restTimerPanel}>
+          <Text style={styles.restLabel}>Rest timer</Text>
+          <Text style={styles.restTime}>{formatSeconds(elapsedRestSeconds)}</Text>
+          <Text style={styles.restHint}>
+            {isResting ? "Stop when the next set starts." : "Start after a set, stop before the next one."}
+          </Text>
+          <Pressable
+            onPress={isResting ? stopRest : startRest}
+            style={({ pressed }) => [
+              styles.restButton,
+              isResting ? styles.restButtonStop : styles.restButtonStart,
+              pressed && styles.restButtonPressed
+            ]}
+          >
+            <Text style={styles.restButtonText}>{isResting ? "Stop Rest" : "Start Rest"}</Text>
+          </Pressable>
+        </View>
+        <View style={styles.restSummary}>
+          <View style={styles.restSummaryRow}>
+            <Text style={styles.restSummaryLabel}>Saved rests</Text>
+            <Text style={styles.restSummaryValue}>{restDurations.length}</Text>
+          </View>
+          <View style={styles.restSummaryRow}>
+            <Text style={styles.restSummaryLabel}>Workout average</Text>
+            <Text style={styles.restSummaryValue}>
+              {workoutAverageRest === "-" ? "-" : formatSeconds(Number(workoutAverageRest))}
+            </Text>
+          </View>
+          {restDurations.length > 0 ? (
+            <View style={styles.restList}>
+              {restDurations.map((duration, index) => (
+                <View key={`${duration}-${index}`} style={styles.restInterval}>
+                  <Text style={styles.restIntervalLabel}>Rest {index + 1}</Text>
+                  <Text style={styles.restIntervalValue}>{formatSeconds(duration)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.restEmpty}>No rest intervals saved yet.</Text>
+          )}
+        </View>
         <PrimaryButton loading={saving} onPress={submit} title="Save Workout" />
       </Card>
     </View>
@@ -356,6 +516,10 @@ function StatsPanel({ stats }: { stats: ReturnType<typeof buildStats> }) {
         <StatCard label="Avg sleep" value={stats.avgSleep} />
         <StatCard label="Sauna total" value={`${stats.saunaMinutes} min`} />
         <StatCard label="Cold total" value={`${stats.plungeMinutes} min`} />
+        <StatCard label="Avg rest" value={stats.avgRestTime} />
+        <StatCard label="Longest rest" value={stats.longestRestTime} />
+        <StatCard label="Shortest rest" value={stats.shortestRestTime} />
+        <StatCard label="Total rest" value={stats.totalRestTime} />
       </View>
       <Card>
         <Text style={styles.cardTitle}>Key insight</Text>
@@ -384,6 +548,11 @@ function buildStats(data: DashboardData) {
   const avgEnergy = average(data.checkins.map((log) => log.energy));
   const avgSleep = average(data.checkins.map((log) => log.sleep));
   const avgSoreness = average(data.checkins.map((log) => log.soreness));
+  const restDurations = data.restPeriods.map((rest) => Number(rest.duration_seconds));
+  const avgRest = averageSeconds(restDurations);
+  const longestRest = restDurations.length > 0 ? Math.max(...restDurations) : null;
+  const shortestRest = restDurations.length > 0 ? Math.min(...restDurations) : null;
+  const totalRest = restDurations.reduce((total, duration) => total + duration, 0);
 
   let insight = "Log a workout, recovery session, or check-in to start building your weekly signal.";
   if (data.workouts.length > 0 && avgEnergy !== "-") {
@@ -400,6 +569,10 @@ function buildStats(data: DashboardData) {
     volume: Math.round(volume),
     saunaMinutes,
     plungeMinutes,
+    avgRestTime: avgRest === "-" ? "-" : formatSeconds(Number(avgRest)),
+    longestRestTime: longestRest === null ? "-" : formatSeconds(longestRest),
+    shortestRestTime: shortestRest === null ? "-" : formatSeconds(shortestRest),
+    totalRestTime: totalRest === 0 ? "-" : formatSeconds(totalRest),
     avgEnergy,
     avgSleep,
     insight
@@ -412,6 +585,21 @@ function average(values: number[]) {
   }
 
   return (values.reduce((total, value) => total + Number(value), 0) / values.length).toFixed(1);
+}
+
+function averageSeconds(values: number[]) {
+  if (values.length === 0) {
+    return "-";
+  }
+
+  return Math.round(values.reduce((total, value) => total + Number(value), 0) / values.length);
+}
+
+function formatSeconds(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function positiveNumber(value: string) {
@@ -461,6 +649,26 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingBottom: 96
   },
+  errorBanner: {
+    backgroundColor: "#2a1214",
+    borderColor: colors.danger,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 12
+  },
+  errorTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 4,
+    textTransform: "uppercase"
+  },
+  errorText: {
+    color: "#fecaca",
+    fontSize: 13,
+    lineHeight: 18
+  },
   stack: {
     gap: 14
   },
@@ -496,6 +704,108 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     gap: 10
+  },
+  restTimerPanel: {
+    alignItems: "center",
+    backgroundColor: "#09090b",
+    borderColor: colors.accent,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+    padding: 18
+  },
+  restLabel: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase"
+  },
+  restTime: {
+    color: colors.text,
+    fontSize: 54,
+    fontWeight: "900",
+    letterSpacing: 1
+  },
+  restHint: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: "center"
+  },
+  restButton: {
+    alignItems: "center",
+    borderRadius: 8,
+    justifyContent: "center",
+    marginTop: 8,
+    minHeight: 58,
+    width: "100%"
+  },
+  restButtonStart: {
+    backgroundColor: colors.accent
+  },
+  restButtonStop: {
+    backgroundColor: colors.danger
+  },
+  restButtonPressed: {
+    opacity: 0.82
+  },
+  restButtonText: {
+    color: "#111111",
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  restSummary: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12
+  },
+  restSummaryRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  restSummaryLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800",
+    textTransform: "uppercase"
+  },
+  restSummaryValue: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  restList: {
+    gap: 8,
+    marginTop: 4
+  },
+  restInterval: {
+    alignItems: "center",
+    backgroundColor: "#151518",
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  restIntervalLabel: {
+    color: colors.muted,
+    fontWeight: "800"
+  },
+  restIntervalValue: {
+    color: colors.text,
+    fontWeight: "900"
+  },
+  restEmpty: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 18
   },
   tabs: {
     backgroundColor: "#101012",
