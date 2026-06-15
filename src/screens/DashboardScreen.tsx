@@ -2,7 +2,9 @@ import { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -260,23 +262,34 @@ export function DashboardScreen({ session }: { session: Session }) {
         </Pressable>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} tintColor={colors.accent} />}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 96 : 0}
+        style={styles.keyboardArea}
       >
-        {errorMessage ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorTitle}>Supabase error</Text>
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-        {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} openDetail={setSelectedDetail} /> : null}
-        {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
-        {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
-        {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
-        {activeTab === "macros" ? <MacroForm macros={data.macros} saving={saving} saveMacro={saveMacro} /> : null}
-        {activeTab === "stats" ? <StatsPanel stats={stats} openDetail={setSelectedDetail} /> : null}
-      </ScrollView>
+        <ScrollView
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={[styles.content, isFormTab(activeTab) && styles.formContent]}
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} tintColor={colors.accent} />}
+          showsVerticalScrollIndicator={false}
+          scrollToOverflowEnabled
+        >
+          {errorMessage ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorTitle}>Supabase error</Text>
+              <Text style={styles.errorText}>{errorMessage}</Text>
+            </View>
+          ) : null}
+          {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} openDetail={setSelectedDetail} /> : null}
+          {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
+          {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
+          {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
+          {activeTab === "macros" ? <MacroForm macros={data.macros} saving={saving} saveMacro={saveMacro} /> : null}
+          {activeTab === "stats" ? <StatsPanel stats={stats} openDetail={setSelectedDetail} /> : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <DetailModal
         data={data}
@@ -1418,6 +1431,10 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function isFormTab(tab: TabKey) {
+  return tab === "workout" || tab === "recovery" || tab === "checkin" || tab === "macros";
+}
+
 function scoreInRange(value: string) {
   return Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 10;
 }
@@ -1427,6 +1444,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     flex: 1,
     paddingTop: 52
+  },
+  keyboardArea: {
+    flex: 1
   },
   header: {
     alignItems: "center",
@@ -1460,6 +1480,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 18,
     paddingBottom: 96
+  },
+  formContent: {
+    paddingBottom: 320
   },
   errorBanner: {
     backgroundColor: "#2a1214",
