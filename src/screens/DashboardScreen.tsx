@@ -12,6 +12,7 @@ import {
   Text,
   View
 } from "react-native";
+import Svg, { Circle, G, Line, Polyline, Rect, Text as SvgText } from "react-native-svg";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
 import { DailyCheckIn, MacroLog, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
@@ -36,10 +37,13 @@ const forgeTips = [
 type DetailKey =
   | "workouts"
   | "volume"
+  | "recovery"
   | "sauna"
   | "cold"
   | "energy"
   | "sleep"
+  | "soreness"
+  | "motivation"
   | "avgRest"
   | "longestRest"
   | "shortestRest"
@@ -63,6 +67,14 @@ type DashboardData = {
   recovery: RecoveryLog[];
   checkins: DailyCheckIn[];
   macros: MacroLog[];
+};
+
+type StatsCategory = "training" | "recovery" | "readiness" | "macros";
+
+type ChartPoint = {
+  label: string;
+  value: number;
+  secondaryValue?: number;
 };
 
 const emptyData: DashboardData = {
@@ -287,7 +299,7 @@ export function DashboardScreen({ session }: { session: Session }) {
           {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
           {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
           {activeTab === "macros" ? <MacroForm macros={data.macros} saving={saving} saveMacro={saveMacro} /> : null}
-          {activeTab === "stats" ? <StatsPanel stats={stats} openDetail={setSelectedDetail} /> : null}
+          {activeTab === "stats" ? <StatsPanel data={data} stats={stats} openDetail={setSelectedDetail} /> : null}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -724,41 +736,261 @@ function MacroForm({
 }
 
 function StatsPanel({
+  data,
   stats,
   openDetail
 }: {
+  data: DashboardData;
   stats: ReturnType<typeof buildStats>;
   openDetail: (detail: DetailKey) => void;
 }) {
+  const [category, setCategory] = useState<StatsCategory>("training");
+  const charts = useMemo(() => buildChartData(data), [data]);
+
   return (
     <View style={styles.stack}>
-      <SectionTitle title="Weekly Stats" subtitle="Averages, totals, and the next useful signal." />
-      <View style={styles.statGrid}>
-        <StatCard label="Workouts" value={stats.workouts} onPress={() => openDetail("workouts")} />
-        <StatCard label="Total volume" value={`${stats.volume} lb`} onPress={() => openDetail("volume")} />
-        <StatCard label="Avg energy" value={stats.avgEnergy} onPress={() => openDetail("energy")} />
-        <StatCard label="Avg sleep" value={stats.avgSleep} onPress={() => openDetail("sleep")} />
-        <StatCard label="Sauna total" value={`${stats.saunaMinutes} min`} onPress={() => openDetail("sauna")} />
-        <StatCard label="Cold total" value={`${stats.plungeMinutes} min`} onPress={() => openDetail("cold")} />
-        <StatCard label="Avg rest" value={stats.avgRestTime} onPress={() => openDetail("avgRest")} />
-        <StatCard label="Longest rest" value={stats.longestRestTime} onPress={() => openDetail("longestRest")} />
-        <StatCard label="Shortest rest" value={stats.shortestRestTime} onPress={() => openDetail("shortestRest")} />
-        <StatCard label="Total rest" value={stats.totalRestTime} onPress={() => openDetail("totalRest")} />
-        <StatCard label="Avg calories" value={stats.avgCalories} onPress={() => openDetail("macroCalories")} />
-        <StatCard label="Avg protein" value={stats.avgProtein} onPress={() => openDetail("macroProtein")} />
-        <StatCard label="Avg carbs" value={stats.avgCarbs} onPress={() => openDetail("macroCarbs")} />
-        <StatCard label="Avg fat" value={stats.avgFat} onPress={() => openDetail("macroFat")} />
-        <StatCard label="Avg water" value={stats.avgWater} onPress={() => openDetail("macroWater")} />
-        <StatCard label="Avg sodium" value={stats.avgSodium} onPress={() => openDetail("macroSodium")} />
-        <StatCard label="Avg weight" value={stats.avgBodyWeight} onPress={() => openDetail("macroWeight")} />
-        <StatCard label="Highest cal day" value={stats.highestCalories} onPress={() => openDetail("macroHighCalories")} />
-        <StatCard label="Lowest cal day" value={stats.lowestCalories} onPress={() => openDetail("macroLowCalories")} />
+      <SectionTitle title="Performance" subtitle="Choose a lane, then tap any card to inspect and edit the logs underneath." />
+      <View style={styles.statsTabs}>
+        {(["training", "recovery", "readiness", "macros"] as StatsCategory[]).map((item) => (
+          <Pressable
+            key={item}
+            onPress={() => setCategory(item)}
+            style={[styles.statsTab, category === item && styles.statsTabActive]}
+          >
+            <Text style={[styles.statsTabText, category === item && styles.statsTabTextActive]}>{categoryLabel(item)}</Text>
+          </Pressable>
+        ))}
       </View>
+
+      {category === "training" ? (
+        <>
+          <Text style={styles.statsSectionHeader}>Training</Text>
+          <View style={styles.statGrid}>
+            <StatCard label="Workouts this week" value={stats.workouts} onPress={() => openDetail("workouts")} />
+            <StatCard label="Total volume" value={`${stats.volume} lb`} onPress={() => openDetail("volume")} />
+            <StatCard label="Avg rest" value={stats.avgRestTime} onPress={() => openDetail("avgRest")} />
+            <StatCard label="Longest rest" value={stats.longestRestTime} onPress={() => openDetail("longestRest")} />
+            <StatCard label="Shortest rest" value={stats.shortestRestTime} onPress={() => openDetail("shortestRest")} />
+          </View>
+          <ChartCard title="Volume Trend" subtitle="Training volume over the last 7 days" points={charts.trainingVolume} variant="bar" unit="lb" />
+        </>
+      ) : null}
+
+      {category === "recovery" ? (
+        <>
+          <Text style={styles.statsSectionHeader}>Recovery</Text>
+          <View style={styles.statGrid}>
+            <StatCard label="Sauna total" value={`${stats.saunaMinutes} min`} onPress={() => openDetail("sauna")} />
+            <StatCard label="Cold total" value={`${stats.plungeMinutes} min`} onPress={() => openDetail("cold")} />
+            <StatCard label="Recovery sessions" value={data.recovery.length} onPress={() => openDetail("recovery")} />
+          </View>
+          <ChartCard
+            title="Heat / Cold Minutes"
+            subtitle="Sauna and cold plunge minutes over the last 7 days"
+            points={charts.recoveryMinutes}
+            variant="groupedBar"
+            unit="min"
+            primaryLabel="Sauna"
+            secondaryLabel="Cold"
+          />
+        </>
+      ) : null}
+
+      {category === "readiness" ? (
+        <>
+          <Text style={styles.statsSectionHeader}>Readiness</Text>
+          <View style={styles.statGrid}>
+            <StatCard label="Avg energy" value={stats.avgEnergy} onPress={() => openDetail("energy")} />
+            <StatCard label="Avg sleep" value={stats.avgSleep} onPress={() => openDetail("sleep")} />
+            <StatCard label="Avg soreness" value={stats.avgSoreness} onPress={() => openDetail("soreness")} />
+            <StatCard label="Avg motivation" value={stats.avgMotivation} onPress={() => openDetail("motivation")} />
+          </View>
+          <ChartCard
+            title="Energy / Sleep"
+            subtitle="Readiness scores over the last 7 days"
+            points={charts.readinessScores}
+            variant="line"
+            unit="/10"
+            primaryLabel="Energy"
+            secondaryLabel="Sleep"
+          />
+        </>
+      ) : null}
+
+      {category === "macros" ? (
+        <>
+          <Text style={styles.statsSectionHeader}>Macros</Text>
+          <View style={styles.statGrid}>
+            <StatCard label="Avg calories" value={stats.avgCalories} onPress={() => openDetail("macroCalories")} />
+            <StatCard label="Avg protein" value={stats.avgProtein} onPress={() => openDetail("macroProtein")} />
+            <StatCard label="Avg carbs" value={stats.avgCarbs} onPress={() => openDetail("macroCarbs")} />
+            <StatCard label="Avg fat" value={stats.avgFat} onPress={() => openDetail("macroFat")} />
+            <StatCard label="Avg body weight" value={stats.avgBodyWeight} onPress={() => openDetail("macroWeight")} />
+            <StatCard label="Avg water" value={stats.avgWater} onPress={() => openDetail("macroWater")} />
+            <StatCard label="Avg sodium" value={stats.avgSodium} onPress={() => openDetail("macroSodium")} />
+          </View>
+          <ChartCard title="Calories" subtitle="Calories over the last 7 days" points={charts.calories} variant="line" />
+          <ChartCard title="Protein" subtitle="Protein grams over the last 7 days" points={charts.protein} variant="bar" unit="g" />
+          <ChartCard title="Body Weight" subtitle="Body weight over the last 7 days" points={charts.bodyWeight} variant="line" unit="lb" />
+        </>
+      ) : null}
+
       <Card>
         <Text style={styles.cardTitle}>Key insight</Text>
         <Text style={styles.cardCopy}>{stats.insight}</Text>
       </Card>
     </View>
+  );
+}
+
+function ChartCard({
+  points,
+  primaryLabel,
+  secondaryLabel,
+  subtitle,
+  title,
+  unit = "",
+  variant
+}: {
+  points: ChartPoint[];
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  subtitle: string;
+  title: string;
+  unit?: string;
+  variant: "bar" | "groupedBar" | "line";
+}) {
+  const hasData = points.some((point) => point.value > 0 || Number(point.secondaryValue ?? 0) > 0);
+
+  return (
+    <Card>
+      <View style={styles.chartHeader}>
+        <View>
+          <Text style={styles.chartTitle}>{title}</Text>
+          <Text style={styles.chartSubtitle}>{subtitle}</Text>
+        </View>
+        {(primaryLabel || secondaryLabel) && hasData ? (
+          <View style={styles.chartLegend}>
+            {primaryLabel ? <LegendItem color={colors.accent} label={primaryLabel} /> : null}
+            {secondaryLabel ? <LegendItem color={colors.muted} label={secondaryLabel} /> : null}
+          </View>
+        ) : null}
+      </View>
+      {hasData ? (
+        <TrendChart points={points} unit={unit} variant={variant} />
+      ) : (
+        <View style={styles.chartEmpty}>
+          <Text style={styles.emptyTitle}>Not enough data yet</Text>
+          <Text style={styles.emptyText}>Log a few entries this week and this chart will start drawing the trend.</Text>
+        </View>
+      )}
+    </Card>
+  );
+}
+
+function LegendItem({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendItem}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Text style={styles.legendText}>{label}</Text>
+    </View>
+  );
+}
+
+function TrendChart({
+  points,
+  unit,
+  variant
+}: {
+  points: ChartPoint[];
+  unit: string;
+  variant: "bar" | "groupedBar" | "line";
+}) {
+  const width = 320;
+  const height = 170;
+  const left = 34;
+  const right = 12;
+  const top = 16;
+  const bottom = 38;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const maxValue = Math.max(1, ...points.flatMap((point) => [point.value, Number(point.secondaryValue ?? 0)]));
+  const xStep = points.length > 1 ? plotWidth / (points.length - 1) : plotWidth;
+  const barSlot = plotWidth / points.length;
+
+  const yFor = (value: number) => top + plotHeight - (value / maxValue) * plotHeight;
+  const xFor = (index: number) => left + index * xStep;
+  const pathFor = (key: "value" | "secondaryValue") =>
+    points
+      .map((point, index) => `${xFor(index)},${yFor(Number(point[key] ?? 0))}`)
+      .join(" ");
+
+  return (
+    <Svg height={height} style={styles.chartSvg} viewBox={`0 0 ${width} ${height}`} width="100%">
+      <Line x1={left} x2={width - right} y1={top + plotHeight} y2={top + plotHeight} stroke={colors.border} strokeWidth="1" />
+      <Line x1={left} x2={width - right} y1={top + plotHeight / 2} y2={top + plotHeight / 2} stroke={colors.border} strokeWidth="1" opacity="0.55" />
+      <SvgText fill={colors.muted} fontSize="10" fontWeight="700" x={left} y={12}>
+        {Math.round(maxValue)}
+        {unit}
+      </SvgText>
+      {points.map((point, index) => {
+        const x = variant === "line" ? xFor(index) : left + index * barSlot + barSlot * 0.18;
+        const primaryHeight = plotHeight - (yFor(point.value) - top);
+        const secondaryHeight = plotHeight - (yFor(Number(point.secondaryValue ?? 0)) - top);
+
+        return (
+          <G key={point.label}>
+            {variant === "bar" ? (
+              <Rect
+                fill={colors.accent}
+                height={Math.max(2, primaryHeight)}
+                rx="3"
+                width={barSlot * 0.54}
+                x={x}
+                y={top + plotHeight - Math.max(2, primaryHeight)}
+              />
+            ) : null}
+            {variant === "groupedBar" ? (
+              <>
+                <Rect
+                  fill={colors.accent}
+                  height={Math.max(2, primaryHeight)}
+                  rx="3"
+                  width={barSlot * 0.25}
+                  x={x}
+                  y={top + plotHeight - Math.max(2, primaryHeight)}
+                />
+                <Rect
+                  fill={colors.muted}
+                  height={Math.max(2, secondaryHeight)}
+                  rx="3"
+                  width={barSlot * 0.25}
+                  x={x + barSlot * 0.32}
+                  y={top + plotHeight - Math.max(2, secondaryHeight)}
+                />
+              </>
+            ) : null}
+            <SvgText fill={colors.muted} fontSize="10" fontWeight="700" textAnchor="middle" x={left + index * barSlot + barSlot / 2} y={height - 13}>
+              {point.label}
+            </SvgText>
+          </G>
+        );
+      })}
+      {variant === "line" ? (
+        <>
+          <Polyline fill="none" points={pathFor("value")} stroke={colors.accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+          {points.some((point) => point.secondaryValue !== undefined) ? (
+            <Polyline fill="none" points={pathFor("secondaryValue")} stroke={colors.muted} strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+          ) : null}
+          {points.map((point, index) => (
+            <G key={`${point.label}-dots`}>
+              <Circle cx={xFor(index)} cy={yFor(point.value)} fill={colors.accent} r="4" />
+              {point.secondaryValue !== undefined ? <Circle cx={xFor(index)} cy={yFor(point.secondaryValue)} fill={colors.muted} r="4" /> : null}
+            </G>
+          ))}
+        </>
+      ) : null}
+    </Svg>
   );
 }
 
@@ -827,7 +1059,7 @@ function DetailModal({
 type DetailItem =
   | { kind: "workout"; log: WorkoutLog; showVolume: boolean }
   | { kind: "recovery"; log: RecoveryLog }
-  | { kind: "checkin"; log: DailyCheckIn; focus: "energy" | "sleep" }
+  | { kind: "checkin"; log: DailyCheckIn; focus: "energy" | "sleep" | "soreness" | "motivation" }
   | { kind: "rest"; log: RestPeriod }
   | { kind: "macro"; log: MacroLog };
 
@@ -850,6 +1082,13 @@ function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { tit
     };
   }
 
+  if (detailKey === "recovery") {
+    return {
+      title: "Recovery logs",
+      items: data.recovery.map((log) => ({ kind: "recovery", log }))
+    };
+  }
+
   if (detailKey === "sauna") {
     return {
       title: "Sauna logs",
@@ -864,9 +1103,16 @@ function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { tit
     };
   }
 
-  if (detailKey === "energy" || detailKey === "sleep") {
+  if (detailKey === "energy" || detailKey === "sleep" || detailKey === "soreness" || detailKey === "motivation") {
+    const titles = {
+      energy: "Energy check-ins",
+      sleep: "Sleep check-ins",
+      soreness: "Soreness check-ins",
+      motivation: "Motivation check-ins"
+    };
+
     return {
-      title: detailKey === "energy" ? "Energy check-ins" : "Sleep check-ins",
+      title: titles[detailKey],
       items: data.checkins.map((log) => ({ kind: "checkin", log, focus: detailKey }))
     };
   }
@@ -1264,11 +1510,18 @@ function getItemMeta(item: DetailItem, workout?: WorkoutLog) {
   }
 
   if (item.kind === "checkin") {
+    const checkinTitles = {
+      energy: `Energy ${item.log.energy}/10`,
+      sleep: `Sleep ${item.log.sleep}/10`,
+      soreness: `Soreness ${item.log.soreness}/10`,
+      motivation: `Motivation ${item.log.motivation}/10`
+    };
+
     return {
       createdAt: item.log.created_at,
       id: item.log.id,
       table: "daily_checkins" as EditableTable,
-      title: item.focus === "energy" ? `Energy ${item.log.energy}/10` : `Sleep ${item.log.sleep}/10`,
+      title: checkinTitles[item.focus],
       rows: [
         { label: "Mood", value: `${item.log.mood}/10` },
         { label: "Energy", value: `${item.log.energy}/10` },
@@ -1320,6 +1573,95 @@ function MiniAction({ title, onPress }: { title: string; onPress: () => void }) 
   );
 }
 
+function buildChartData(data: DashboardData) {
+  const days = lastSevenDays();
+
+  return {
+    trainingVolume: days.map((day) => ({
+      label: day.label,
+      value: sumValues(
+        data.workouts.filter((log) => dateKey(new Date(log.created_at)) === day.key),
+        (log) => Number(log.sets) * Number(log.reps) * Number(log.weight)
+      )
+    })),
+    recoveryMinutes: days.map((day) => {
+      const logs = data.recovery.filter((log) => dateKey(new Date(log.created_at)) === day.key);
+      return {
+        label: day.label,
+        value: sumValues(
+          logs.filter((log) => log.recovery_type === "sauna"),
+          (log) => Number(log.duration_minutes)
+        ),
+        secondaryValue: sumValues(
+          logs.filter((log) => log.recovery_type === "cold_plunge"),
+          (log) => Number(log.duration_minutes)
+        )
+      };
+    }),
+    readinessScores: days.map((day) => {
+      const logs = data.checkins.filter((log) => dateKey(new Date(log.created_at)) === day.key);
+      return {
+        label: day.label,
+        value: averageNumber(logs.map((log) => log.energy)),
+        secondaryValue: averageNumber(logs.map((log) => log.sleep))
+      };
+    }),
+    calories: days.map((day) => ({
+      label: day.label,
+      value: sumValues(
+        data.macros.filter((log) => log.logged_date === day.key),
+        (log) => Number(log.calories)
+      )
+    })),
+    protein: days.map((day) => ({
+      label: day.label,
+      value: sumValues(
+        data.macros.filter((log) => log.logged_date === day.key),
+        (log) => Number(log.protein_g)
+      )
+    })),
+    bodyWeight: days.map((day) => ({
+      label: day.label,
+      value: averageNumber(data.macros.filter((log) => log.logged_date === day.key).map((log) => log.body_weight_lb))
+    }))
+  };
+}
+
+function lastSevenDays() {
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (6 - index));
+
+    return {
+      key: dateKey(date),
+      label: date.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 3)
+    };
+  });
+}
+
+function sumValues<T>(items: T[], valueFor: (item: T) => number) {
+  return items.reduce((total, item) => total + valueFor(item), 0);
+}
+
+function averageNumber(values: number[]) {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return values.reduce((total, value) => total + Number(value), 0) / values.length;
+}
+
+function categoryLabel(category: StatsCategory) {
+  const labels: Record<StatsCategory, string> = {
+    training: "Training",
+    recovery: "Recovery",
+    readiness: "Readiness",
+    macros: "Macros"
+  };
+
+  return labels[category];
+}
+
 function buildStats(data: DashboardData) {
   const volume = data.workouts.reduce((total, log) => total + Number(log.sets) * Number(log.reps) * Number(log.weight), 0);
   const saunaMinutes = data.recovery
@@ -1331,6 +1673,7 @@ function buildStats(data: DashboardData) {
   const avgEnergy = average(data.checkins.map((log) => log.energy));
   const avgSleep = average(data.checkins.map((log) => log.sleep));
   const avgSoreness = average(data.checkins.map((log) => log.soreness));
+  const avgMotivation = average(data.checkins.map((log) => log.motivation));
   const restDurations = data.restPeriods.map((rest) => Number(rest.duration_seconds));
   const avgRest = averageSeconds(restDurations);
   const longestRest = restDurations.length > 0 ? Math.max(...restDurations) : null;
@@ -1374,6 +1717,8 @@ function buildStats(data: DashboardData) {
     lowestCalories: lowestCalories === null ? "-" : lowestCalories,
     avgEnergy,
     avgSleep,
+    avgSoreness,
+    avgMotivation,
     insight
   };
 }
@@ -1511,6 +1856,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10
+  },
+  statsTabs: {
+    backgroundColor: colors.panel,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    padding: 6
+  },
+  statsTab: {
+    alignItems: "center",
+    borderRadius: 8,
+    flex: 1,
+    paddingVertical: 10
+  },
+  statsTabActive: {
+    backgroundColor: colors.accent
+  },
+  statsTabText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  statsTabTextActive: {
+    color: "#111111"
+  },
+  statsSectionHeader: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase"
   },
   cardTitle: {
     color: colors.text,
@@ -1650,6 +2028,50 @@ const styles = StyleSheet.create({
     minHeight: 60,
     paddingHorizontal: 14,
     paddingVertical: 12
+  },
+  chartHeader: {
+    gap: 10
+  },
+  chartTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  chartSubtitle: {
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 3
+  },
+  chartLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12
+  },
+  legendItem: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6
+  },
+  legendDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  legendText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  chartSvg: {
+    marginTop: 4
+  },
+  chartEmpty: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 14
   },
   modalBackdrop: {
     backgroundColor: "rgba(0, 0, 0, 0.72)",
