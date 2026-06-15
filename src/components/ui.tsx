@@ -19,8 +19,8 @@ export const colors = {
   border: "#2b2b30",
   text: "#f4f4f5",
   muted: "#a1a1aa",
-  accent: "#f97316",
-  accentDark: "#9a3412",
+  accent: "#c8ad7f",
+  accentDark: "#8f7650",
   danger: "#ef4444",
   success: "#22c55e"
 };
