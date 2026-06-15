@@ -37,16 +37,20 @@ export function SectionTitle({ title, subtitle }: { title: string; subtitle?: st
 
 export function Field({
   label,
+  containerStyle,
+  inputStyle,
   ...props
 }: TextInputProps & {
   label: string;
+  containerStyle?: object;
+  inputStyle?: object;
 }) {
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         placeholderTextColor="#71717a"
-        style={[styles.input, props.multiline ? styles.textArea : null]}
+        style={[styles.input, props.multiline ? styles.textArea : null, inputStyle]}
         {...props}
       />
     </View>

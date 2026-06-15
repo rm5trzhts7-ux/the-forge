@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { supabase } from "../lib/supabase";
-import { Card, colors, Field, PrimaryButton } from "../components/ui";
+import { colors, Field, PrimaryButton } from "../components/ui";
 
 export function AuthScreen() {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -44,7 +44,14 @@ export function AuthScreen() {
         </Text>
       </View>
 
-      <Card>
+      <View style={styles.authCard}>
+        <View style={styles.formHeader}>
+          <Text style={styles.formTitle}>{mode === "login" ? "Welcome back" : "Start forging"}</Text>
+          <Text style={styles.formSubtitle}>
+            {mode === "login" ? "Log in to continue tracking your work." : "Create your account and start logging."}
+          </Text>
+        </View>
+
         <View style={styles.switcher}>
           <Pressable
             onPress={() => setMode("login")}
@@ -63,16 +70,26 @@ export function AuthScreen() {
         <Field
           autoCapitalize="none"
           autoComplete="email"
+          autoCorrect={false}
+          containerStyle={styles.authField}
+          inputStyle={styles.authInput}
           keyboardType="email-address"
-          label="Email"
+          label="Email address"
           onChangeText={setEmail}
+          placeholder="you@example.com"
+          textContentType="emailAddress"
           value={email}
         />
         <Field
           autoCapitalize="none"
+          autoCorrect={false}
+          containerStyle={styles.authField}
+          inputStyle={styles.authInput}
           label="Password"
           onChangeText={setPassword}
+          placeholder="Minimum 6 characters"
           secureTextEntry
+          textContentType={mode === "login" ? "password" : "newPassword"}
           value={password}
         />
         <PrimaryButton
@@ -80,7 +97,7 @@ export function AuthScreen() {
           onPress={submit}
           title={mode === "login" ? "Enter The Forge" : "Create Account"}
         />
-      </Card>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -113,6 +130,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 23
   },
+  authCard: {
+    backgroundColor: "#121214",
+    borderColor: "#333337",
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 18,
+    padding: 18,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.32,
+    shadowRadius: 24
+  },
+  formHeader: {
+    gap: 5
+  },
+  formTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900"
+  },
+  formSubtitle: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20
+  },
   switcher: {
     backgroundColor: colors.panelSoft,
     borderRadius: 8,
@@ -134,5 +176,16 @@ const styles = StyleSheet.create({
   },
   switchTextActive: {
     color: "#111111"
+  },
+  authField: {
+    gap: 8
+  },
+  authInput: {
+    backgroundColor: "#202024",
+    borderColor: "#4a4a50",
+    borderWidth: 1.5,
+    fontSize: 17,
+    minHeight: 56,
+    paddingHorizontal: 14
   }
 });
