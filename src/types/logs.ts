@@ -1,4 +1,4 @@
-export type TabKey = "home" | "workout" | "recovery" | "checkin" | "stats";
+export type TabKey = "home" | "workout" | "recovery" | "checkin" | "macros" | "stats";
 
 export type WorkoutLog = {
   id: string;
@@ -39,5 +39,20 @@ export type DailyCheckIn = {
   sleep: number;
   motivation: number;
   notes: string | null;
+  created_at: string;
+};
+
+export type MacroLog = {
+  id: string;
+  user_id: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  water_oz: number;
+  sodium_mg: number;
+  body_weight_lb: number;
+  notes: string | null;
+  logged_date: string;
   created_at: string;
 };

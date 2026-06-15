@@ -133,16 +133,34 @@ create table if not exists public.daily_checkins (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.macro_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  calories numeric not null default 0 check (calories >= 0),
+  protein_g numeric not null default 0 check (protein_g >= 0),
+  carbs_g numeric not null default 0 check (carbs_g >= 0),
+  fat_g numeric not null default 0 check (fat_g >= 0),
+  water_oz numeric not null default 0 check (water_oz >= 0),
+  sodium_mg numeric not null default 0 check (sodium_mg >= 0),
+  body_weight_lb numeric not null default 0 check (body_weight_lb >= 0),
+  notes text,
+  logged_date date not null default current_date,
+  created_at timestamptz not null default now(),
+  unique (user_id, logged_date)
+);
+
 alter table public.workout_logs enable row level security;
 alter table public.rest_periods enable row level security;
 alter table public.recovery_logs enable row level security;
 alter table public.daily_checkins enable row level security;
+alter table public.macro_logs enable row level security;
 
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on public.workout_logs to authenticated;
 grant select, insert, update, delete on public.rest_periods to authenticated;
 grant select, insert, update, delete on public.recovery_logs to authenticated;
 grant select, insert, update, delete on public.daily_checkins to authenticated;
+grant select, insert, update, delete on public.macro_logs to authenticated;
 
 drop policy if exists "Users can read their workout logs" on public.workout_logs;
 drop policy if exists "Users can add their workout logs" on public.workout_logs;
@@ -161,6 +179,8 @@ drop policy if exists "Users can read their check-ins" on public.daily_checkins;
 drop policy if exists "Users can add their check-ins" on public.daily_checkins;
 drop policy if exists "Users can manage their check-ins" on public.daily_checkins;
 drop policy if exists "Users can access their daily check-ins" on public.daily_checkins;
+drop policy if exists "Users can manage their macro logs" on public.macro_logs;
+drop policy if exists "Users can access their macro logs" on public.macro_logs;
 
 create policy "Users can manage their workout logs"
   on public.workout_logs for all
@@ -190,8 +210,14 @@ create policy "Users can manage their check-ins"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+create policy "Users can manage their macro logs"
+  on public.macro_logs for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
 create index if not exists workout_logs_user_created_idx on public.workout_logs (user_id, created_at desc);
 create index if not exists rest_periods_user_created_idx on public.rest_periods (user_id, created_at desc);
 create index if not exists rest_periods_workout_order_idx on public.rest_periods (workout_id, interval_order);
 create index if not exists recovery_logs_user_created_idx on public.recovery_logs (user_id, created_at desc);
 create index if not exists daily_checkins_user_created_idx on public.daily_checkins (user_id, created_at desc);
+create index if not exists macro_logs_user_logged_date_idx on public.macro_logs (user_id, logged_date desc);

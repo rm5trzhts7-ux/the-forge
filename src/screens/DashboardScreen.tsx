@@ -12,13 +12,14 @@ import {
 } from "react-native";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
-import { DailyCheckIn, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
+import { DailyCheckIn, MacroLog, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "home", label: "Home" },
   { key: "workout", label: "Workout" },
   { key: "recovery", label: "Recovery" },
   { key: "checkin", label: "Check-in" },
+  { key: "macros", label: "Macros" },
   { key: "stats", label: "Stats" }
 ];
 
@@ -40,9 +41,18 @@ type DetailKey =
   | "avgRest"
   | "longestRest"
   | "shortestRest"
-  | "totalRest";
+  | "totalRest"
+  | "macroCalories"
+  | "macroProtein"
+  | "macroCarbs"
+  | "macroFat"
+  | "macroWater"
+  | "macroSodium"
+  | "macroWeight"
+  | "macroHighCalories"
+  | "macroLowCalories";
 
-type EditableTable = "workout_logs" | "recovery_logs" | "daily_checkins" | "rest_periods";
+type EditableTable = "workout_logs" | "recovery_logs" | "daily_checkins" | "rest_periods" | "macro_logs";
 type EditableValues = Record<string, string | number | null>;
 
 type DashboardData = {
@@ -50,13 +60,15 @@ type DashboardData = {
   restPeriods: RestPeriod[];
   recovery: RecoveryLog[];
   checkins: DailyCheckIn[];
+  macros: MacroLog[];
 };
 
 const emptyData: DashboardData = {
   workouts: [],
   restPeriods: [],
   recovery: [],
-  checkins: []
+  checkins: [],
+  macros: []
 };
 
 export function DashboardScreen({ session }: { session: Session }) {
@@ -72,16 +84,17 @@ export function DashboardScreen({ session }: { session: Session }) {
     const since = new Date();
     since.setDate(since.getDate() - 7);
 
-    const [workouts, restPeriods, recovery, checkins] = await Promise.all([
+    const [workouts, restPeriods, recovery, checkins, macros] = await Promise.all([
       supabase.from("workout_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
       supabase.from("rest_periods").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
       supabase.from("recovery_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
-      supabase.from("daily_checkins").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false })
+      supabase.from("daily_checkins").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("macro_logs").select("*").gte("logged_date", dateKey(since)).order("logged_date", { ascending: false })
     ]);
 
     setRefreshing(false);
 
-    const firstError = workouts.error || restPeriods.error || recovery.error || checkins.error;
+    const firstError = workouts.error || restPeriods.error || recovery.error || checkins.error || macros.error;
     if (firstError) {
       setErrorMessage(firstError.message);
       Alert.alert("Could not load logs", firstError.message);
@@ -93,7 +106,8 @@ export function DashboardScreen({ session }: { session: Session }) {
       workouts: (workouts.data ?? []) as WorkoutLog[],
       restPeriods: (restPeriods.data ?? []) as RestPeriod[],
       recovery: (recovery.data ?? []) as RecoveryLog[],
-      checkins: (checkins.data ?? []) as DailyCheckIn[]
+      checkins: (checkins.data ?? []) as DailyCheckIn[],
+      macros: (macros.data ?? []) as MacroLog[]
     });
   }, []);
 
@@ -180,6 +194,28 @@ export function DashboardScreen({ session }: { session: Session }) {
     return true;
   }
 
+  async function saveMacro(values: Omit<MacroLog, "id" | "user_id" | "created_at">) {
+    setSaving(true);
+    const { error } = await supabase.from("macro_logs").upsert(
+      {
+        user_id: session.user.id,
+        ...values
+      },
+      { onConflict: "user_id,logged_date" }
+    );
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Macro save failed", error.message);
+      return false;
+    }
+
+    setErrorMessage("");
+    await loadData();
+    return true;
+  }
+
   async function updateLog(table: EditableTable, id: string, values: EditableValues) {
     setSaving(true);
     const { error } = await supabase.from(table).update(values).eq("id", id).eq("user_id", session.user.id);
@@ -238,6 +274,7 @@ export function DashboardScreen({ session }: { session: Session }) {
         {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
         {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
         {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
+        {activeTab === "macros" ? <MacroForm macros={data.macros} saving={saving} saveMacro={saveMacro} /> : null}
         {activeTab === "stats" ? <StatsPanel stats={stats} openDetail={setSelectedDetail} /> : null}
       </ScrollView>
 
@@ -291,6 +328,15 @@ function Home({
           <MiniAction title="Log workout" onPress={() => setActiveTab("workout")} />
           <MiniAction title="Log recovery" onPress={() => setActiveTab("recovery")} />
           <MiniAction title="Check in" onPress={() => setActiveTab("checkin")} />
+        </View>
+      </Card>
+      <Card>
+        <Text style={styles.cardTitle}>Macro Summary</Text>
+        <View style={styles.statGrid}>
+          <StatCard label="Today calories" value={stats.todayCalories} onPress={() => openDetail("macroCalories")} />
+          <StatCard label="Today protein" value={stats.todayProtein} onPress={() => openDetail("macroProtein")} />
+          <StatCard label="Body weight" value={stats.todayBodyWeight} onPress={() => openDetail("macroWeight")} />
+          <StatCard label="Avg calories" value={stats.avgCalories} onPress={() => openDetail("macroCalories")} />
         </View>
       </Card>
     </View>
@@ -571,6 +617,99 @@ function CheckInForm({
   );
 }
 
+function MacroForm({
+  macros,
+  saving,
+  saveMacro
+}: {
+  macros: MacroLog[];
+  saving: boolean;
+  saveMacro: (values: Omit<MacroLog, "id" | "user_id" | "created_at">) => Promise<boolean>;
+}) {
+  const today = dateKey(new Date());
+  const todayLog = macros.find((log) => log.logged_date === today);
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+  const [carbs, setCarbs] = useState("");
+  const [fat, setFat] = useState("");
+  const [water, setWater] = useState("");
+  const [sodium, setSodium] = useState("");
+  const [bodyWeight, setBodyWeight] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    if (!todayLog) {
+      return;
+    }
+
+    setCalories(String(todayLog.calories));
+    setProtein(String(todayLog.protein_g));
+    setCarbs(String(todayLog.carbs_g));
+    setFat(String(todayLog.fat_g));
+    setWater(String(todayLog.water_oz));
+    setSodium(String(todayLog.sodium_mg));
+    setBodyWeight(String(todayLog.body_weight_lb));
+    setNotes(todayLog.notes ?? "");
+  }, [todayLog?.id]);
+
+  async function submit() {
+    const required = [calories, protein, carbs, fat, water, sodium, bodyWeight];
+    if (!required.every(nonNegativeNumber)) {
+      Alert.alert("Check macros", "Use zero or greater for calories, macros, water, sodium, and body weight.");
+      return;
+    }
+
+    const saved = await saveMacro({
+      calories: Number(calories),
+      protein_g: Number(protein),
+      carbs_g: Number(carbs),
+      fat_g: Number(fat),
+      water_oz: Number(water),
+      sodium_mg: Number(sodium),
+      body_weight_lb: Number(bodyWeight),
+      notes: notes.trim() || null,
+      logged_date: today
+    });
+
+    if (saved) {
+      Alert.alert("Macros saved", "Today's nutrition log is updated.");
+    }
+  }
+
+  return (
+    <View style={styles.stack}>
+      <SectionTitle title="Macro Log" subtitle="Daily nutrition, hydration, sodium, and body weight." />
+      <Card>
+        <Text style={styles.cardTitle}>Today</Text>
+        <View style={styles.statGrid}>
+          <StatCard label="Calories" value={todayLog ? todayLog.calories : "-"} />
+          <StatCard label="Protein" value={todayLog ? `${todayLog.protein_g}g` : "-"} />
+          <StatCard label="Weight" value={todayLog ? `${todayLog.body_weight_lb} lb` : "-"} />
+          <StatCard label="Water" value={todayLog ? `${todayLog.water_oz} oz` : "-"} />
+        </View>
+      </Card>
+      <Card>
+        <Text style={styles.cardTitle}>{todayLog ? "Edit Today's Macros" : "Log Today's Macros"}</Text>
+        <Field label="Calories" keyboardType="number-pad" inputStyle={styles.macroInput} onChangeText={setCalories} value={calories} />
+        <View style={styles.row}>
+          <Field label="Protein g" keyboardType="decimal-pad" inputStyle={styles.macroInput} onChangeText={setProtein} value={protein} />
+          <Field label="Carbs g" keyboardType="decimal-pad" inputStyle={styles.macroInput} onChangeText={setCarbs} value={carbs} />
+        </View>
+        <View style={styles.row}>
+          <Field label="Fat g" keyboardType="decimal-pad" inputStyle={styles.macroInput} onChangeText={setFat} value={fat} />
+          <Field label="Water oz" keyboardType="decimal-pad" inputStyle={styles.macroInput} onChangeText={setWater} value={water} />
+        </View>
+        <View style={styles.row}>
+          <Field label="Sodium mg" keyboardType="number-pad" inputStyle={styles.macroInput} onChangeText={setSodium} value={sodium} />
+          <Field label="Body weight lb" keyboardType="decimal-pad" inputStyle={styles.macroInput} onChangeText={setBodyWeight} value={bodyWeight} />
+        </View>
+        <Field label="Notes" multiline onChangeText={setNotes} value={notes} placeholder="Training day, appetite, meals..." />
+        <PrimaryButton loading={saving} onPress={submit} title="Save Macros" />
+      </Card>
+    </View>
+  );
+}
+
 function StatsPanel({
   stats,
   openDetail
@@ -592,6 +731,15 @@ function StatsPanel({
         <StatCard label="Longest rest" value={stats.longestRestTime} onPress={() => openDetail("longestRest")} />
         <StatCard label="Shortest rest" value={stats.shortestRestTime} onPress={() => openDetail("shortestRest")} />
         <StatCard label="Total rest" value={stats.totalRestTime} onPress={() => openDetail("totalRest")} />
+        <StatCard label="Avg calories" value={stats.avgCalories} onPress={() => openDetail("macroCalories")} />
+        <StatCard label="Avg protein" value={stats.avgProtein} onPress={() => openDetail("macroProtein")} />
+        <StatCard label="Avg carbs" value={stats.avgCarbs} onPress={() => openDetail("macroCarbs")} />
+        <StatCard label="Avg fat" value={stats.avgFat} onPress={() => openDetail("macroFat")} />
+        <StatCard label="Avg water" value={stats.avgWater} onPress={() => openDetail("macroWater")} />
+        <StatCard label="Avg sodium" value={stats.avgSodium} onPress={() => openDetail("macroSodium")} />
+        <StatCard label="Avg weight" value={stats.avgBodyWeight} onPress={() => openDetail("macroWeight")} />
+        <StatCard label="Highest cal day" value={stats.highestCalories} onPress={() => openDetail("macroHighCalories")} />
+        <StatCard label="Lowest cal day" value={stats.lowestCalories} onPress={() => openDetail("macroLowCalories")} />
       </View>
       <Card>
         <Text style={styles.cardTitle}>Key insight</Text>
@@ -667,7 +815,8 @@ type DetailItem =
   | { kind: "workout"; log: WorkoutLog; showVolume: boolean }
   | { kind: "recovery"; log: RecoveryLog }
   | { kind: "checkin"; log: DailyCheckIn; focus: "energy" | "sleep" }
-  | { kind: "rest"; log: RestPeriod };
+  | { kind: "rest"; log: RestPeriod }
+  | { kind: "macro"; log: MacroLog };
 
 function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { title: string; items: DetailItem[] } {
   if (!detailKey) {
@@ -709,6 +858,34 @@ function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { tit
     };
   }
 
+  if (detailKey.startsWith("macro")) {
+    const calories = data.macros.map((log) => Number(log.calories));
+    const high = calories.length > 0 ? Math.max(...calories) : null;
+    const low = calories.length > 0 ? Math.min(...calories) : null;
+    const macroLogs =
+      detailKey === "macroHighCalories" && high !== null
+        ? data.macros.filter((log) => Number(log.calories) === high)
+        : detailKey === "macroLowCalories" && low !== null
+          ? data.macros.filter((log) => Number(log.calories) === low)
+          : data.macros;
+    const titles: Record<string, string> = {
+      macroCalories: "Calories history",
+      macroProtein: "Protein history",
+      macroCarbs: "Carbs history",
+      macroFat: "Fat history",
+      macroWater: "Water history",
+      macroSodium: "Sodium history",
+      macroWeight: "Body weight history",
+      macroHighCalories: "Highest calorie day",
+      macroLowCalories: "Lowest calorie day"
+    };
+
+    return {
+      title: titles[detailKey],
+      items: macroLogs.map((log) => ({ kind: "macro", log }))
+    };
+  }
+
   const durations = data.restPeriods.map((log) => Number(log.duration_seconds));
   const longest = durations.length > 0 ? Math.max(...durations) : null;
   const shortest = durations.length > 0 ? Math.min(...durations) : null;
@@ -726,8 +903,10 @@ function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { tit
     totalRest: "Total rest time"
   };
 
+  const restKey = detailKey as "avgRest" | "longestRest" | "shortestRest" | "totalRest";
+
   return {
-    title: titles[detailKey],
+    title: titles[restKey],
     items: restPeriods.map((log) => ({ kind: "rest", log }))
   };
 }
@@ -844,6 +1023,20 @@ function initialFields(item: DetailItem): Record<string, string> {
     };
   }
 
+  if (item.kind === "macro") {
+    return {
+      calories: String(item.log.calories),
+      protein_g: String(item.log.protein_g),
+      carbs_g: String(item.log.carbs_g),
+      fat_g: String(item.log.fat_g),
+      water_oz: String(item.log.water_oz),
+      sodium_mg: String(item.log.sodium_mg),
+      body_weight_lb: String(item.log.body_weight_lb),
+      logged_date: item.log.logged_date,
+      notes: item.log.notes ?? ""
+    };
+  }
+
   return {
     duration_seconds: String(item.log.duration_seconds),
     interval_order: String(item.log.interval_order)
@@ -899,6 +1092,28 @@ function renderEditFields(item: DetailItem, fields: Record<string, string>, upda
           <Field label="Sleep" keyboardType="number-pad" onChangeText={(value) => updateField("sleep", value)} value={fields.sleep} />
         </View>
         <Field label="Motivation" keyboardType="number-pad" onChangeText={(value) => updateField("motivation", value)} value={fields.motivation} />
+        <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
+      </>
+    );
+  }
+
+  if (item.kind === "macro") {
+    return (
+      <>
+        <Field label="Calories" keyboardType="number-pad" onChangeText={(value) => updateField("calories", value)} value={fields.calories} />
+        <View style={styles.row}>
+          <Field label="Protein g" keyboardType="decimal-pad" onChangeText={(value) => updateField("protein_g", value)} value={fields.protein_g} />
+          <Field label="Carbs g" keyboardType="decimal-pad" onChangeText={(value) => updateField("carbs_g", value)} value={fields.carbs_g} />
+        </View>
+        <View style={styles.row}>
+          <Field label="Fat g" keyboardType="decimal-pad" onChangeText={(value) => updateField("fat_g", value)} value={fields.fat_g} />
+          <Field label="Water oz" keyboardType="decimal-pad" onChangeText={(value) => updateField("water_oz", value)} value={fields.water_oz} />
+        </View>
+        <View style={styles.row}>
+          <Field label="Sodium mg" keyboardType="number-pad" onChangeText={(value) => updateField("sodium_mg", value)} value={fields.sodium_mg} />
+          <Field label="Weight lb" keyboardType="decimal-pad" onChangeText={(value) => updateField("body_weight_lb", value)} value={fields.body_weight_lb} />
+        </View>
+        <Field label="Logged date" onChangeText={(value) => updateField("logged_date", value)} value={fields.logged_date} />
         <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
       </>
     );
@@ -973,6 +1188,26 @@ function valuesFromFields(item: DetailItem, fields: Record<string, string>): Edi
     };
   }
 
+  if (item.kind === "macro") {
+    const numericFields = ["calories", "protein_g", "carbs_g", "fat_g", "water_oz", "sodium_mg", "body_weight_lb"];
+    if (!numericFields.every((field) => nonNegativeNumber(fields[field])) || !fields.logged_date.trim()) {
+      Alert.alert("Check macros", "Macro values must be zero or greater, and logged date is required.");
+      return null;
+    }
+
+    return {
+      calories: Number(fields.calories),
+      protein_g: Number(fields.protein_g),
+      carbs_g: Number(fields.carbs_g),
+      fat_g: Number(fields.fat_g),
+      water_oz: Number(fields.water_oz),
+      sodium_mg: Number(fields.sodium_mg),
+      body_weight_lb: Number(fields.body_weight_lb),
+      logged_date: fields.logged_date.trim(),
+      notes: fields.notes.trim() || null
+    };
+  }
+
   if (!positiveNumber(fields.duration_seconds) || !positiveNumber(fields.interval_order)) {
     Alert.alert("Check rest interval", "Duration seconds and rest number must be positive.");
     return null;
@@ -1032,6 +1267,25 @@ function getItemMeta(item: DetailItem, workout?: WorkoutLog) {
     };
   }
 
+  if (item.kind === "macro") {
+    return {
+      createdAt: item.log.created_at,
+      id: item.log.id,
+      table: "macro_logs" as EditableTable,
+      title: `${item.log.logged_date} macros`,
+      rows: [
+        { label: "Calories", value: String(item.log.calories) },
+        { label: "Protein", value: `${item.log.protein_g}g` },
+        { label: "Carbs", value: `${item.log.carbs_g}g` },
+        { label: "Fat", value: `${item.log.fat_g}g` },
+        { label: "Water", value: `${item.log.water_oz} oz` },
+        { label: "Sodium", value: `${item.log.sodium_mg} mg` },
+        { label: "Body weight", value: `${item.log.body_weight_lb} lb` },
+        { label: "Notes", value: item.log.notes || "-" }
+      ]
+    };
+  }
+
   return {
     createdAt: item.log.created_at,
     id: item.log.id,
@@ -1069,6 +1323,10 @@ function buildStats(data: DashboardData) {
   const longestRest = restDurations.length > 0 ? Math.max(...restDurations) : null;
   const shortestRest = restDurations.length > 0 ? Math.min(...restDurations) : null;
   const totalRest = restDurations.reduce((total, duration) => total + duration, 0);
+  const todayMacro = data.macros.find((log) => log.logged_date === dateKey(new Date()));
+  const calorieValues = data.macros.map((log) => Number(log.calories));
+  const highestCalories = calorieValues.length > 0 ? Math.max(...calorieValues) : null;
+  const lowestCalories = calorieValues.length > 0 ? Math.min(...calorieValues) : null;
 
   let insight = "Log a workout, recovery session, or check-in to start building your weekly signal.";
   if (data.workouts.length > 0 && avgEnergy !== "-") {
@@ -1089,6 +1347,18 @@ function buildStats(data: DashboardData) {
     longestRestTime: longestRest === null ? "-" : formatSeconds(longestRest),
     shortestRestTime: shortestRest === null ? "-" : formatSeconds(shortestRest),
     totalRestTime: totalRest === 0 ? "-" : formatSeconds(totalRest),
+    todayCalories: todayMacro ? todayMacro.calories : "-",
+    todayProtein: todayMacro ? `${todayMacro.protein_g}g` : "-",
+    todayBodyWeight: todayMacro ? `${todayMacro.body_weight_lb} lb` : "-",
+    avgCalories: averageMacro(data.macros.map((log) => log.calories), ""),
+    avgProtein: averageMacro(data.macros.map((log) => log.protein_g), "g"),
+    avgCarbs: averageMacro(data.macros.map((log) => log.carbs_g), "g"),
+    avgFat: averageMacro(data.macros.map((log) => log.fat_g), "g"),
+    avgWater: averageMacro(data.macros.map((log) => log.water_oz), " oz"),
+    avgSodium: averageMacro(data.macros.map((log) => log.sodium_mg), " mg"),
+    avgBodyWeight: averageMacro(data.macros.map((log) => log.body_weight_lb), " lb"),
+    highestCalories: highestCalories === null ? "-" : highestCalories,
+    lowestCalories: lowestCalories === null ? "-" : lowestCalories,
     avgEnergy,
     avgSleep,
     insight
@@ -1129,6 +1399,23 @@ function formatDate(value: string) {
 
 function positiveNumber(value: string) {
   return Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+function nonNegativeNumber(value: string) {
+  return value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function averageMacro(values: number[], suffix: string) {
+  if (values.length === 0) {
+    return "-";
+  }
+
+  const averaged = Math.round((values.reduce((total, value) => total + Number(value), 0) / values.length) * 10) / 10;
+  return `${averaged}${suffix}`;
+}
+
+function dateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 function scoreInRange(value: string) {
@@ -1331,6 +1618,15 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 18
+  },
+  macroInput: {
+    backgroundColor: "#252529",
+    borderColor: "#686871",
+    borderWidth: 1.5,
+    fontSize: 18,
+    minHeight: 60,
+    paddingHorizontal: 14,
+    paddingVertical: 12
   },
   modalBackdrop: {
     backgroundColor: "rgba(0, 0, 0, 0.72)",
