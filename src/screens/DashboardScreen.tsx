@@ -263,13 +263,13 @@ export function DashboardScreen({ session }: { session: Session }) {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 96 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardArea}
       >
         <ScrollView
           automaticallyAdjustKeyboardInsets
           contentContainerStyle={[styles.content, isFormTab(activeTab) && styles.formContent]}
+          contentInsetAdjustmentBehavior="automatic"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadData} tintColor={colors.accent} />}
@@ -1482,7 +1482,7 @@ const styles = StyleSheet.create({
     paddingBottom: 96
   },
   formContent: {
-    paddingBottom: 320
+    paddingBottom: 112
   },
   errorBanner: {
     backgroundColor: "#2a1214",
