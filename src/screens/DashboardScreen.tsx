@@ -2,6 +2,7 @@ import { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -29,6 +30,21 @@ const forgeTips = [
   "If soreness is high, earn tomorrow by recovering well today."
 ];
 
+type DetailKey =
+  | "workouts"
+  | "volume"
+  | "sauna"
+  | "cold"
+  | "energy"
+  | "sleep"
+  | "avgRest"
+  | "longestRest"
+  | "shortestRest"
+  | "totalRest";
+
+type EditableTable = "workout_logs" | "recovery_logs" | "daily_checkins" | "rest_periods";
+type EditableValues = Record<string, string | number | null>;
+
 type DashboardData = {
   workouts: WorkoutLog[];
   restPeriods: RestPeriod[];
@@ -49,6 +65,7 @@ export function DashboardScreen({ session }: { session: Session }) {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [selectedDetail, setSelectedDetail] = useState<DetailKey | null>(null);
 
   const loadData = useCallback(async () => {
     setRefreshing(true);
@@ -163,6 +180,38 @@ export function DashboardScreen({ session }: { session: Session }) {
     return true;
   }
 
+  async function updateLog(table: EditableTable, id: string, values: EditableValues) {
+    setSaving(true);
+    const { error } = await supabase.from(table).update(values).eq("id", id).eq("user_id", session.user.id);
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Update failed", error.message);
+      return false;
+    }
+
+    setErrorMessage("");
+    await loadData();
+    return true;
+  }
+
+  async function deleteLog(table: EditableTable, id: string) {
+    setSaving(true);
+    const { error } = await supabase.from(table).delete().eq("id", id).eq("user_id", session.user.id);
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Delete failed", error.message);
+      return false;
+    }
+
+    setErrorMessage("");
+    await loadData();
+    return true;
+  }
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -185,12 +234,21 @@ export function DashboardScreen({ session }: { session: Session }) {
             <Text style={styles.errorText}>{errorMessage}</Text>
           </View>
         ) : null}
-        {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} /> : null}
+        {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} openDetail={setSelectedDetail} /> : null}
         {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
         {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
         {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
-        {activeTab === "stats" ? <StatsPanel stats={stats} /> : null}
+        {activeTab === "stats" ? <StatsPanel stats={stats} openDetail={setSelectedDetail} /> : null}
       </ScrollView>
+
+      <DetailModal
+        data={data}
+        detailKey={selectedDetail}
+        onClose={() => setSelectedDetail(null)}
+        onDelete={deleteLog}
+        onUpdate={updateLog}
+        saving={saving}
+      />
 
       <View style={styles.tabs}>
         {tabs.map((tab) => (
@@ -207,16 +265,24 @@ export function DashboardScreen({ session }: { session: Session }) {
   );
 }
 
-function Home({ stats, setActiveTab }: { stats: ReturnType<typeof buildStats>; setActiveTab: (tab: TabKey) => void }) {
+function Home({
+  stats,
+  setActiveTab,
+  openDetail
+}: {
+  stats: ReturnType<typeof buildStats>;
+  setActiveTab: (tab: TabKey) => void;
+  openDetail: (detail: DetailKey) => void;
+}) {
   return (
     <View style={styles.stack}>
       <SectionTitle title="Dashboard" subtitle="Your last 7 days of work, recovery, and readiness." />
       <View style={styles.statGrid}>
-        <StatCard label="Workouts" value={stats.workouts} />
-        <StatCard label="Volume" value={`${stats.volume} lb`} />
-        <StatCard label="Sauna" value={`${stats.saunaMinutes} min`} />
-        <StatCard label="Cold" value={`${stats.plungeMinutes} min`} />
-        <StatCard label="Avg rest" value={stats.avgRestTime} />
+        <StatCard label="Workouts" value={stats.workouts} onPress={() => openDetail("workouts")} />
+        <StatCard label="Volume" value={`${stats.volume} lb`} onPress={() => openDetail("volume")} />
+        <StatCard label="Sauna" value={`${stats.saunaMinutes} min`} onPress={() => openDetail("sauna")} />
+        <StatCard label="Cold" value={`${stats.plungeMinutes} min`} onPress={() => openDetail("cold")} />
+        <StatCard label="Avg rest" value={stats.avgRestTime} onPress={() => openDetail("avgRest")} />
       </View>
       <Card>
         <Text style={styles.cardTitle}>Today</Text>
@@ -505,21 +571,27 @@ function CheckInForm({
   );
 }
 
-function StatsPanel({ stats }: { stats: ReturnType<typeof buildStats> }) {
+function StatsPanel({
+  stats,
+  openDetail
+}: {
+  stats: ReturnType<typeof buildStats>;
+  openDetail: (detail: DetailKey) => void;
+}) {
   return (
     <View style={styles.stack}>
       <SectionTitle title="Weekly Stats" subtitle="Averages, totals, and the next useful signal." />
       <View style={styles.statGrid}>
-        <StatCard label="Workouts" value={stats.workouts} />
-        <StatCard label="Total volume" value={`${stats.volume} lb`} />
-        <StatCard label="Avg energy" value={stats.avgEnergy} />
-        <StatCard label="Avg sleep" value={stats.avgSleep} />
-        <StatCard label="Sauna total" value={`${stats.saunaMinutes} min`} />
-        <StatCard label="Cold total" value={`${stats.plungeMinutes} min`} />
-        <StatCard label="Avg rest" value={stats.avgRestTime} />
-        <StatCard label="Longest rest" value={stats.longestRestTime} />
-        <StatCard label="Shortest rest" value={stats.shortestRestTime} />
-        <StatCard label="Total rest" value={stats.totalRestTime} />
+        <StatCard label="Workouts" value={stats.workouts} onPress={() => openDetail("workouts")} />
+        <StatCard label="Total volume" value={`${stats.volume} lb`} onPress={() => openDetail("volume")} />
+        <StatCard label="Avg energy" value={stats.avgEnergy} onPress={() => openDetail("energy")} />
+        <StatCard label="Avg sleep" value={stats.avgSleep} onPress={() => openDetail("sleep")} />
+        <StatCard label="Sauna total" value={`${stats.saunaMinutes} min`} onPress={() => openDetail("sauna")} />
+        <StatCard label="Cold total" value={`${stats.plungeMinutes} min`} onPress={() => openDetail("cold")} />
+        <StatCard label="Avg rest" value={stats.avgRestTime} onPress={() => openDetail("avgRest")} />
+        <StatCard label="Longest rest" value={stats.longestRestTime} onPress={() => openDetail("longestRest")} />
+        <StatCard label="Shortest rest" value={stats.shortestRestTime} onPress={() => openDetail("shortestRest")} />
+        <StatCard label="Total rest" value={stats.totalRestTime} onPress={() => openDetail("totalRest")} />
       </View>
       <Card>
         <Text style={styles.cardTitle}>Key insight</Text>
@@ -527,6 +599,450 @@ function StatsPanel({ stats }: { stats: ReturnType<typeof buildStats> }) {
       </Card>
     </View>
   );
+}
+
+function DetailModal({
+  data,
+  detailKey,
+  onClose,
+  onDelete,
+  onUpdate,
+  saving
+}: {
+  data: DashboardData;
+  detailKey: DetailKey | null;
+  onClose: () => void;
+  onDelete: (table: EditableTable, id: string) => Promise<boolean>;
+  onUpdate: (table: EditableTable, id: string, values: EditableValues) => Promise<boolean>;
+  saving: boolean;
+}) {
+  const workoutsById = useMemo(() => {
+    return data.workouts.reduce<Record<string, WorkoutLog>>((lookup, workout) => {
+      lookup[workout.id] = workout;
+      return lookup;
+    }, {});
+  }, [data.workouts]);
+  const detail = useMemo(() => getDetailItems(detailKey, data), [data, detailKey]);
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={detailKey !== null}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalPanel}>
+          <View style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalEyebrow}>Weekly detail</Text>
+              <Text style={styles.modalTitle}>{detail.title}</Text>
+            </View>
+            <Pressable onPress={onClose} style={styles.modalClose}>
+              <Text style={styles.modalCloseText}>Close</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+            {detail.items.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No logs yet</Text>
+                <Text style={styles.emptyText}>This stat has no entries for the selected week.</Text>
+              </View>
+            ) : (
+              detail.items.map((item) => (
+                <LogEntryEditor
+                  key={`${item.kind}-${item.log.id}`}
+                  item={item}
+                  onDelete={onDelete}
+                  onUpdate={onUpdate}
+                  saving={saving}
+                  workout={item.kind === "rest" ? workoutsById[item.log.workout_id] : undefined}
+                />
+              ))
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+type DetailItem =
+  | { kind: "workout"; log: WorkoutLog; showVolume: boolean }
+  | { kind: "recovery"; log: RecoveryLog }
+  | { kind: "checkin"; log: DailyCheckIn; focus: "energy" | "sleep" }
+  | { kind: "rest"; log: RestPeriod };
+
+function getDetailItems(detailKey: DetailKey | null, data: DashboardData): { title: string; items: DetailItem[] } {
+  if (!detailKey) {
+    return { title: "", items: [] };
+  }
+
+  if (detailKey === "workouts") {
+    return {
+      title: "Workout logs",
+      items: data.workouts.map((log) => ({ kind: "workout", log, showVolume: false }))
+    };
+  }
+
+  if (detailKey === "volume") {
+    return {
+      title: "Total volume",
+      items: data.workouts.map((log) => ({ kind: "workout", log, showVolume: true }))
+    };
+  }
+
+  if (detailKey === "sauna") {
+    return {
+      title: "Sauna logs",
+      items: data.recovery.filter((log) => log.recovery_type === "sauna").map((log) => ({ kind: "recovery", log }))
+    };
+  }
+
+  if (detailKey === "cold") {
+    return {
+      title: "Cold plunge logs",
+      items: data.recovery.filter((log) => log.recovery_type === "cold_plunge").map((log) => ({ kind: "recovery", log }))
+    };
+  }
+
+  if (detailKey === "energy" || detailKey === "sleep") {
+    return {
+      title: detailKey === "energy" ? "Energy check-ins" : "Sleep check-ins",
+      items: data.checkins.map((log) => ({ kind: "checkin", log, focus: detailKey }))
+    };
+  }
+
+  const durations = data.restPeriods.map((log) => Number(log.duration_seconds));
+  const longest = durations.length > 0 ? Math.max(...durations) : null;
+  const shortest = durations.length > 0 ? Math.min(...durations) : null;
+  const restPeriods =
+    detailKey === "longestRest" && longest !== null
+      ? data.restPeriods.filter((log) => Number(log.duration_seconds) === longest)
+      : detailKey === "shortestRest" && shortest !== null
+        ? data.restPeriods.filter((log) => Number(log.duration_seconds) === shortest)
+        : data.restPeriods;
+
+  const titles: Record<"avgRest" | "longestRest" | "shortestRest" | "totalRest", string> = {
+    avgRest: "Average rest time",
+    longestRest: "Longest rest time",
+    shortestRest: "Shortest rest time",
+    totalRest: "Total rest time"
+  };
+
+  return {
+    title: titles[detailKey],
+    items: restPeriods.map((log) => ({ kind: "rest", log }))
+  };
+}
+
+function LogEntryEditor({
+  item,
+  onDelete,
+  onUpdate,
+  saving,
+  workout
+}: {
+  item: DetailItem;
+  onDelete: (table: EditableTable, id: string) => Promise<boolean>;
+  onUpdate: (table: EditableTable, id: string, values: EditableValues) => Promise<boolean>;
+  saving: boolean;
+  workout?: WorkoutLog;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [fields, setFields] = useState<Record<string, string>>(() => initialFields(item));
+  const meta = getItemMeta(item, workout);
+
+  function updateField(key: string, value: string) {
+    setFields((current) => ({ ...current, [key]: value }));
+  }
+
+  function askDelete() {
+    Alert.alert("Delete log?", "This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          onDelete(meta.table, meta.id);
+        }
+      }
+    ]);
+  }
+
+  async function saveEdit() {
+    const values = valuesFromFields(item, fields);
+    if (!values) {
+      return;
+    }
+
+    const saved = await onUpdate(meta.table, meta.id, values);
+    if (saved) {
+      setEditing(false);
+    }
+  }
+
+  return (
+    <View style={styles.logCard}>
+      <View style={styles.logHeader}>
+        <View style={styles.logHeaderText}>
+          <Text style={styles.logTitle}>{meta.title}</Text>
+          <Text style={styles.logDate}>{formatDate(meta.createdAt)}</Text>
+        </View>
+        <View style={styles.logActions}>
+          <Pressable onPress={() => setEditing((value) => !value)} style={styles.secondaryAction}>
+            <Text style={styles.secondaryActionText}>{editing ? "Cancel" : "Edit"}</Text>
+          </Pressable>
+          <Pressable onPress={askDelete} style={styles.deleteAction}>
+            <Text style={styles.deleteActionText}>Delete</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {editing ? (
+        <View style={styles.editForm}>
+          {renderEditFields(item, fields, updateField)}
+          <PrimaryButton loading={saving} onPress={saveEdit} title="Save Changes" />
+        </View>
+      ) : (
+        <View style={styles.logRows}>
+          {meta.rows.map((row) => (
+            <View key={row.label} style={styles.logRow}>
+              <Text style={styles.logRowLabel}>{row.label}</Text>
+              <Text style={styles.logRowValue}>{row.value}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function initialFields(item: DetailItem): Record<string, string> {
+  if (item.kind === "workout") {
+    return {
+      exercise: item.log.exercise,
+      sets: String(item.log.sets),
+      reps: String(item.log.reps),
+      weight: String(item.log.weight),
+      notes: item.log.notes ?? ""
+    };
+  }
+
+  if (item.kind === "recovery") {
+    return {
+      duration_minutes: String(item.log.duration_minutes),
+      temperature: item.log.temperature === null ? "" : String(item.log.temperature),
+      notes: item.log.notes ?? ""
+    };
+  }
+
+  if (item.kind === "checkin") {
+    return {
+      mood: String(item.log.mood),
+      energy: String(item.log.energy),
+      soreness: String(item.log.soreness),
+      sleep: String(item.log.sleep),
+      motivation: String(item.log.motivation),
+      notes: item.log.notes ?? ""
+    };
+  }
+
+  return {
+    duration_seconds: String(item.log.duration_seconds),
+    interval_order: String(item.log.interval_order)
+  };
+}
+
+function renderEditFields(item: DetailItem, fields: Record<string, string>, updateField: (key: string, value: string) => void) {
+  if (item.kind === "workout") {
+    return (
+      <>
+        <Field label="Exercise" onChangeText={(value) => updateField("exercise", value)} value={fields.exercise} />
+        <View style={styles.row}>
+          <Field label="Sets" keyboardType="number-pad" onChangeText={(value) => updateField("sets", value)} value={fields.sets} />
+          <Field label="Reps" keyboardType="number-pad" onChangeText={(value) => updateField("reps", value)} value={fields.reps} />
+        </View>
+        <Field label="Weight" keyboardType="decimal-pad" onChangeText={(value) => updateField("weight", value)} value={fields.weight} />
+        <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
+      </>
+    );
+  }
+
+  if (item.kind === "recovery") {
+    return (
+      <>
+        <Field
+          label="Duration minutes"
+          keyboardType="number-pad"
+          onChangeText={(value) => updateField("duration_minutes", value)}
+          value={fields.duration_minutes}
+        />
+        {item.log.recovery_type === "cold_plunge" ? (
+          <Field
+            label="Temperature F"
+            keyboardType="decimal-pad"
+            onChangeText={(value) => updateField("temperature", value)}
+            value={fields.temperature}
+          />
+        ) : null}
+        <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
+      </>
+    );
+  }
+
+  if (item.kind === "checkin") {
+    return (
+      <>
+        <View style={styles.row}>
+          <Field label="Mood" keyboardType="number-pad" onChangeText={(value) => updateField("mood", value)} value={fields.mood} />
+          <Field label="Energy" keyboardType="number-pad" onChangeText={(value) => updateField("energy", value)} value={fields.energy} />
+        </View>
+        <View style={styles.row}>
+          <Field label="Soreness" keyboardType="number-pad" onChangeText={(value) => updateField("soreness", value)} value={fields.soreness} />
+          <Field label="Sleep" keyboardType="number-pad" onChangeText={(value) => updateField("sleep", value)} value={fields.sleep} />
+        </View>
+        <Field label="Motivation" keyboardType="number-pad" onChangeText={(value) => updateField("motivation", value)} value={fields.motivation} />
+        <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Field
+        label="Duration seconds"
+        keyboardType="number-pad"
+        onChangeText={(value) => updateField("duration_seconds", value)}
+        value={fields.duration_seconds}
+      />
+      <Field
+        label="Rest number"
+        keyboardType="number-pad"
+        onChangeText={(value) => updateField("interval_order", value)}
+        value={fields.interval_order}
+      />
+    </>
+  );
+}
+
+function valuesFromFields(item: DetailItem, fields: Record<string, string>): EditableValues | null {
+  if (item.kind === "workout") {
+    if (!fields.exercise.trim() || !positiveNumber(fields.sets) || !positiveNumber(fields.reps) || Number(fields.weight || 0) < 0) {
+      Alert.alert("Check workout", "Exercise, sets, reps, and a valid weight are required.");
+      return null;
+    }
+
+    return {
+      exercise: fields.exercise.trim(),
+      sets: Number(fields.sets),
+      reps: Number(fields.reps),
+      weight: Number(fields.weight || 0),
+      notes: fields.notes.trim() || null
+    };
+  }
+
+  if (item.kind === "recovery") {
+    if (!positiveNumber(fields.duration_minutes)) {
+      Alert.alert("Check recovery", "Duration must be at least 1 minute.");
+      return null;
+    }
+
+    if (item.log.recovery_type === "cold_plunge" && (!positiveNumber(fields.temperature) || Number(fields.temperature) < 32 || Number(fields.temperature) > 80)) {
+      Alert.alert("Check cold plunge", "Temperature should be 32-80 F.");
+      return null;
+    }
+
+    return {
+      duration_minutes: Number(fields.duration_minutes),
+      temperature: item.log.recovery_type === "sauna" ? null : Number(fields.temperature),
+      notes: fields.notes.trim() || null
+    };
+  }
+
+  if (item.kind === "checkin") {
+    const scores = ["mood", "energy", "soreness", "sleep", "motivation"];
+    if (!scores.every((score) => scoreInRange(fields[score]))) {
+      Alert.alert("Check scores", "All check-in scores should be 1 through 10.");
+      return null;
+    }
+
+    return {
+      mood: Number(fields.mood),
+      energy: Number(fields.energy),
+      soreness: Number(fields.soreness),
+      sleep: Number(fields.sleep),
+      motivation: Number(fields.motivation),
+      notes: fields.notes.trim() || null
+    };
+  }
+
+  if (!positiveNumber(fields.duration_seconds) || !positiveNumber(fields.interval_order)) {
+    Alert.alert("Check rest interval", "Duration seconds and rest number must be positive.");
+    return null;
+  }
+
+  return {
+    duration_seconds: Number(fields.duration_seconds),
+    interval_order: Number(fields.interval_order)
+  };
+}
+
+function getItemMeta(item: DetailItem, workout?: WorkoutLog) {
+  if (item.kind === "workout") {
+    const volume = Number(item.log.sets) * Number(item.log.reps) * Number(item.log.weight);
+    return {
+      createdAt: item.log.created_at,
+      id: item.log.id,
+      table: "workout_logs" as EditableTable,
+      title: item.log.exercise,
+      rows: [
+        { label: "Sets x reps", value: `${item.log.sets} x ${item.log.reps}` },
+        { label: "Weight", value: `${item.log.weight} lb` },
+        { label: "Volume", value: `${volume} lb` },
+        { label: "Notes", value: item.log.notes || "-" }
+      ]
+    };
+  }
+
+  if (item.kind === "recovery") {
+    return {
+      createdAt: item.log.created_at,
+      id: item.log.id,
+      table: "recovery_logs" as EditableTable,
+      title: item.log.recovery_type === "sauna" ? "Sauna" : "Cold plunge",
+      rows: [
+        { label: "Duration", value: `${item.log.duration_minutes} min` },
+        { label: "Temperature", value: item.log.temperature === null ? "-" : `${item.log.temperature} F` },
+        { label: "Notes", value: item.log.notes || "-" }
+      ]
+    };
+  }
+
+  if (item.kind === "checkin") {
+    return {
+      createdAt: item.log.created_at,
+      id: item.log.id,
+      table: "daily_checkins" as EditableTable,
+      title: item.focus === "energy" ? `Energy ${item.log.energy}/10` : `Sleep ${item.log.sleep}/10`,
+      rows: [
+        { label: "Mood", value: `${item.log.mood}/10` },
+        { label: "Energy", value: `${item.log.energy}/10` },
+        { label: "Soreness", value: `${item.log.soreness}/10` },
+        { label: "Sleep", value: `${item.log.sleep}/10` },
+        { label: "Motivation", value: `${item.log.motivation}/10` },
+        { label: "Notes", value: item.log.notes || "-" }
+      ]
+    };
+  }
+
+  return {
+    createdAt: item.log.created_at,
+    id: item.log.id,
+    table: "rest_periods" as EditableTable,
+    title: `Rest ${item.log.interval_order}`,
+    rows: [
+      { label: "Duration", value: formatSeconds(Number(item.log.duration_seconds)) },
+      { label: "Workout", value: workout ? workout.exercise : item.log.workout_id },
+      { label: "Workout date", value: workout ? formatDate(workout.created_at) : "-" }
+    ]
+  };
 }
 
 function MiniAction({ title, onPress }: { title: string; onPress: () => void }) {
@@ -600,6 +1116,15 @@ function formatSeconds(totalSeconds: number) {
   const seconds = totalSeconds % 60;
 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 function positiveNumber(value: string) {
@@ -806,6 +1331,156 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 13,
     lineHeight: 18
+  },
+  modalBackdrop: {
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    flex: 1,
+    justifyContent: "flex-end"
+  },
+  modalPanel: {
+    backgroundColor: colors.bg,
+    borderColor: colors.border,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderWidth: 1,
+    maxHeight: "88%",
+    paddingTop: 18
+  },
+  modalHeader: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: 14,
+    paddingHorizontal: 18
+  },
+  modalEyebrow: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase"
+  },
+  modalTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    marginTop: 4
+  },
+  modalClose: {
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  modalCloseText: {
+    color: colors.text,
+    fontWeight: "800"
+  },
+  modalContent: {
+    gap: 12,
+    padding: 18,
+    paddingBottom: 34
+  },
+  emptyState: {
+    backgroundColor: colors.panel,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 18
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  emptyText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 6
+  },
+  logCard: {
+    backgroundColor: colors.panel,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 14
+  },
+  logHeader: {
+    gap: 12
+  },
+  logHeaderText: {
+    gap: 4
+  },
+  logTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900"
+  },
+  logDate: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  logActions: {
+    flexDirection: "row",
+    gap: 10
+  },
+  secondaryAction: {
+    alignItems: "center",
+    borderColor: colors.accent,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 10
+  },
+  secondaryActionText: {
+    color: colors.accent,
+    fontWeight: "900"
+  },
+  deleteAction: {
+    alignItems: "center",
+    borderColor: colors.danger,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 10
+  },
+  deleteActionText: {
+    color: "#fecaca",
+    fontWeight: "900"
+  },
+  logRows: {
+    gap: 8,
+    marginTop: 14
+  },
+  logRow: {
+    alignItems: "flex-start",
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
+    padding: 10
+  },
+  logRowLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    textTransform: "uppercase"
+  },
+  logRowValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  editForm: {
+    gap: 12,
+    marginTop: 14
   },
   tabs: {
     backgroundColor: "#101012",

@@ -50,29 +50,38 @@ alter table public.rest_periods enable row level security;
 alter table public.recovery_logs enable row level security;
 alter table public.daily_checkins enable row level security;
 
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.workout_logs to authenticated;
+grant select, insert, update, delete on public.rest_periods to authenticated;
+grant select, insert, update, delete on public.recovery_logs to authenticated;
+grant select, insert, update, delete on public.daily_checkins to authenticated;
+
 drop policy if exists "Users can read their workout logs" on public.workout_logs;
 drop policy if exists "Users can add their workout logs" on public.workout_logs;
+drop policy if exists "Users can manage their workout logs" on public.workout_logs;
+drop policy if exists "Users can access their workout logs" on public.workout_logs;
 drop policy if exists "Users can read their rest periods" on public.rest_periods;
 drop policy if exists "Users can add their rest periods" on public.rest_periods;
+drop policy if exists "Users can manage their rest periods" on public.rest_periods;
+drop policy if exists "Users can access their rest periods" on public.rest_periods;
+drop policy if exists "Users can add rest periods for their workouts" on public.rest_periods;
 drop policy if exists "Users can read their recovery logs" on public.recovery_logs;
 drop policy if exists "Users can add their recovery logs" on public.recovery_logs;
+drop policy if exists "Users can manage their recovery logs" on public.recovery_logs;
+drop policy if exists "Users can access their recovery logs" on public.recovery_logs;
 drop policy if exists "Users can read their check-ins" on public.daily_checkins;
 drop policy if exists "Users can add their check-ins" on public.daily_checkins;
+drop policy if exists "Users can manage their check-ins" on public.daily_checkins;
+drop policy if exists "Users can access their daily check-ins" on public.daily_checkins;
 
-create policy "Users can read their workout logs"
-  on public.workout_logs for select
-  using (auth.uid() = user_id);
-
-create policy "Users can add their workout logs"
-  on public.workout_logs for insert
+create policy "Users can manage their workout logs"
+  on public.workout_logs for all
+  using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
-create policy "Users can read their rest periods"
-  on public.rest_periods for select
-  using (auth.uid() = user_id);
-
-create policy "Users can add their rest periods"
-  on public.rest_periods for insert
+create policy "Users can manage their rest periods"
+  on public.rest_periods for all
+  using (auth.uid() = user_id)
   with check (
     auth.uid() = user_id
     and exists (
@@ -83,20 +92,14 @@ create policy "Users can add their rest periods"
     )
   );
 
-create policy "Users can read their recovery logs"
-  on public.recovery_logs for select
-  using (auth.uid() = user_id);
-
-create policy "Users can add their recovery logs"
-  on public.recovery_logs for insert
+create policy "Users can manage their recovery logs"
+  on public.recovery_logs for all
+  using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
-create policy "Users can read their check-ins"
-  on public.daily_checkins for select
-  using (auth.uid() = user_id);
-
-create policy "Users can add their check-ins"
-  on public.daily_checkins for insert
+create policy "Users can manage their check-ins"
+  on public.daily_checkins for all
+  using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
 create index if not exists workout_logs_user_created_idx on public.workout_logs (user_id, created_at desc);

@@ -88,12 +88,33 @@ export function PrimaryButton({
   );
 }
 
-export function StatCard({ label, value }: { label: string; value: string | number }) {
-  return (
-    <View style={styles.statCard}>
+export function StatCard({
+  label,
+  value,
+  onPress
+}: {
+  label: string;
+  value: string | number;
+  onPress?: () => void;
+}) {
+  const content = (
+    <>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={styles.statCard}>{content}</View>;
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.statCard, pressed && styles.statCardPressed]}
+    >
+      {content}
+    </Pressable>
   );
 }
 
@@ -172,6 +193,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: "45%",
     padding: 14
+  },
+  statCardPressed: {
+    borderColor: colors.accent,
+    opacity: 0.82
   },
   statValue: {
     color: colors.text,
