@@ -16,13 +16,101 @@ create table if not exists public.recovery_logs (
   user_id uuid not null references auth.users(id) on delete cascade,
   recovery_type text not null check (recovery_type in ('sauna', 'cold_plunge')),
   duration_minutes integer not null check (duration_minutes > 0),
-  temperature numeric check (
+  temperature_f numeric check (
     recovery_type = 'sauna'
-    or (temperature is not null and temperature >= 32 and temperature <= 80)
+    or (temperature_f is not null and temperature_f >= 32 and temperature_f <= 80)
   ),
   notes text,
   created_at timestamptz not null default now()
 );
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'type'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'recovery_type'
+  ) then
+    alter table public.recovery_logs rename column type to recovery_type;
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'recovery_type'
+  ) then
+    alter table public.recovery_logs add column recovery_type text;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'type'
+  ) then
+    update public.recovery_logs
+    set recovery_type = coalesce(recovery_type, type)
+    where recovery_type is null;
+
+    alter table public.recovery_logs alter column type drop not null;
+  end if;
+
+  update public.recovery_logs
+  set recovery_type = coalesce(recovery_type, 'sauna')
+  where recovery_type is null;
+
+  alter table public.recovery_logs alter column recovery_type set not null;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'temperature'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'temperature_f'
+  ) then
+    alter table public.recovery_logs rename column temperature to temperature_f;
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'temperature_f'
+  ) then
+    alter table public.recovery_logs add column temperature_f numeric;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'recovery_logs' and column_name = 'temperature'
+  ) then
+    update public.recovery_logs
+    set temperature_f = coalesce(temperature_f, temperature)
+    where temperature_f is null;
+
+    alter table public.recovery_logs alter column temperature drop not null;
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.recovery_logs'::regclass
+      and conname = 'recovery_logs_recovery_type_check'
+  ) then
+    alter table public.recovery_logs
+      add constraint recovery_logs_recovery_type_check
+      check (recovery_type in ('sauna', 'cold_plunge'));
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.recovery_logs'::regclass
+      and conname = 'recovery_logs_temperature_f_check'
+  ) then
+    alter table public.recovery_logs
+      add constraint recovery_logs_temperature_f_check
+      check (
+        recovery_type = 'sauna'
+        or (temperature_f is not null and temperature_f >= 32 and temperature_f <= 80)
+      );
+  end if;
+end $$;
 
 create table if not exists public.rest_periods (
   id uuid primary key default gen_random_uuid(),

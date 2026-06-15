@@ -451,7 +451,7 @@ function RecoveryForms({
   const [saunaDuration, setSaunaDuration] = useState("");
   const [saunaNotes, setSaunaNotes] = useState("");
   const [plungeDuration, setPlungeDuration] = useState("");
-  const [temperature, setTemperature] = useState("");
+  const [temperature_f, setTemperature] = useState("");
   const [plungeNotes, setPlungeNotes] = useState("");
 
   async function saveSauna() {
@@ -463,7 +463,7 @@ function RecoveryForms({
     const saved = await saveRow("recovery_logs", {
       recovery_type: "sauna",
       duration_minutes: Number(saunaDuration),
-      temperature: null,
+      temperature_f: null,
       notes: saunaNotes.trim() || null
     });
     if (saved) {
@@ -473,7 +473,7 @@ function RecoveryForms({
   }
 
   async function savePlunge() {
-    if (!positiveNumber(plungeDuration) || !positiveNumber(temperature) || Number(temperature) < 32 || Number(temperature) > 80) {
+    if (!positiveNumber(plungeDuration) || !positiveNumber(temperature_f) || Number(temperature_f) < 32 || Number(temperature_f) > 80) {
       Alert.alert("Add plunge details", "Duration is required and temperature should be 32-80 F.");
       return;
     }
@@ -481,7 +481,7 @@ function RecoveryForms({
     const saved = await saveRow("recovery_logs", {
       recovery_type: "cold_plunge",
       duration_minutes: Number(plungeDuration),
-      temperature: Number(temperature),
+      temperature_f: Number(temperature_f),
       notes: plungeNotes.trim() || null
     });
     if (saved) {
@@ -503,7 +503,7 @@ function RecoveryForms({
       <Card>
         <Text style={styles.cardTitle}>Cold Plunge</Text>
         <Field label="Duration minutes" keyboardType="number-pad" onChangeText={setPlungeDuration} value={plungeDuration} />
-        <Field label="Temperature F" keyboardType="decimal-pad" onChangeText={setTemperature} value={temperature} placeholder="45" />
+        <Field label="Temperature F" keyboardType="decimal-pad" onChangeText={setTemperature} value={temperature_f} placeholder="45" />
         <Field label="Notes" multiline onChangeText={setPlungeNotes} value={plungeNotes} placeholder="First minute was rough." />
         <PrimaryButton loading={saving} onPress={savePlunge} title="Save Cold Plunge" />
       </Card>
@@ -828,7 +828,7 @@ function initialFields(item: DetailItem): Record<string, string> {
   if (item.kind === "recovery") {
     return {
       duration_minutes: String(item.log.duration_minutes),
-      temperature: item.log.temperature === null ? "" : String(item.log.temperature),
+      temperature_f: item.log.temperature_f === null ? "" : String(item.log.temperature_f),
       notes: item.log.notes ?? ""
     };
   }
@@ -878,8 +878,8 @@ function renderEditFields(item: DetailItem, fields: Record<string, string>, upda
           <Field
             label="Temperature F"
             keyboardType="decimal-pad"
-            onChangeText={(value) => updateField("temperature", value)}
-            value={fields.temperature}
+            onChangeText={(value) => updateField("temperature_f", value)}
+            value={fields.temperature_f}
           />
         ) : null}
         <Field label="Notes" multiline onChangeText={(value) => updateField("notes", value)} value={fields.notes} />
@@ -944,14 +944,14 @@ function valuesFromFields(item: DetailItem, fields: Record<string, string>): Edi
       return null;
     }
 
-    if (item.log.recovery_type === "cold_plunge" && (!positiveNumber(fields.temperature) || Number(fields.temperature) < 32 || Number(fields.temperature) > 80)) {
+    if (item.log.recovery_type === "cold_plunge" && (!positiveNumber(fields.temperature_f) || Number(fields.temperature_f) < 32 || Number(fields.temperature_f) > 80)) {
       Alert.alert("Check cold plunge", "Temperature should be 32-80 F.");
       return null;
     }
 
     return {
       duration_minutes: Number(fields.duration_minutes),
-      temperature: item.log.recovery_type === "sauna" ? null : Number(fields.temperature),
+      temperature_f: item.log.recovery_type === "sauna" ? null : Number(fields.temperature_f),
       notes: fields.notes.trim() || null
     };
   }
@@ -1009,7 +1009,7 @@ function getItemMeta(item: DetailItem, workout?: WorkoutLog) {
       title: item.log.recovery_type === "sauna" ? "Sauna" : "Cold plunge",
       rows: [
         { label: "Duration", value: `${item.log.duration_minutes} min` },
-        { label: "Temperature", value: item.log.temperature === null ? "-" : `${item.log.temperature} F` },
+        { label: "Temperature", value: item.log.temperature_f === null ? "-" : `${item.log.temperature_f} F` },
         { label: "Notes", value: item.log.notes || "-" }
       ]
     };

@@ -25,7 +25,7 @@ export type RecoveryLog = {
   user_id: string;
   recovery_type: "sauna" | "cold_plunge";
   duration_minutes: number;
-  temperature: number | null;
+  temperature_f: number | null;
   notes: string | null;
   created_at: string;
 };
