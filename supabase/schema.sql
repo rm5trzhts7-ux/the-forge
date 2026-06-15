@@ -11,19 +11,15 @@ create table if not exists public.workout_logs (
   created_at timestamptz not null default now()
 );
 
-create table if not exists public.sauna_logs (
+create table if not exists public.recovery_logs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
+  recovery_type text not null check (recovery_type in ('sauna', 'cold_plunge')),
   duration_minutes integer not null check (duration_minutes > 0),
-  notes text,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists public.cold_plunge_logs (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  duration_minutes integer not null check (duration_minutes > 0),
-  temperature numeric not null check (temperature >= 32 and temperature <= 80),
+  temperature numeric check (
+    recovery_type = 'sauna'
+    or (temperature is not null and temperature >= 32 and temperature <= 80)
+  ),
   notes text,
   created_at timestamptz not null default now()
 );
@@ -41,9 +37,15 @@ create table if not exists public.daily_checkins (
 );
 
 alter table public.workout_logs enable row level security;
-alter table public.sauna_logs enable row level security;
-alter table public.cold_plunge_logs enable row level security;
+alter table public.recovery_logs enable row level security;
 alter table public.daily_checkins enable row level security;
+
+drop policy if exists "Users can read their workout logs" on public.workout_logs;
+drop policy if exists "Users can add their workout logs" on public.workout_logs;
+drop policy if exists "Users can read their recovery logs" on public.recovery_logs;
+drop policy if exists "Users can add their recovery logs" on public.recovery_logs;
+drop policy if exists "Users can read their check-ins" on public.daily_checkins;
+drop policy if exists "Users can add their check-ins" on public.daily_checkins;
 
 create policy "Users can read their workout logs"
   on public.workout_logs for select
@@ -53,20 +55,12 @@ create policy "Users can add their workout logs"
   on public.workout_logs for insert
   with check (auth.uid() = user_id);
 
-create policy "Users can read their sauna logs"
-  on public.sauna_logs for select
+create policy "Users can read their recovery logs"
+  on public.recovery_logs for select
   using (auth.uid() = user_id);
 
-create policy "Users can add their sauna logs"
-  on public.sauna_logs for insert
-  with check (auth.uid() = user_id);
-
-create policy "Users can read their cold plunge logs"
-  on public.cold_plunge_logs for select
-  using (auth.uid() = user_id);
-
-create policy "Users can add their cold plunge logs"
-  on public.cold_plunge_logs for insert
+create policy "Users can add their recovery logs"
+  on public.recovery_logs for insert
   with check (auth.uid() = user_id);
 
 create policy "Users can read their check-ins"
@@ -78,6 +72,5 @@ create policy "Users can add their check-ins"
   with check (auth.uid() = user_id);
 
 create index if not exists workout_logs_user_created_idx on public.workout_logs (user_id, created_at desc);
-create index if not exists sauna_logs_user_created_idx on public.sauna_logs (user_id, created_at desc);
-create index if not exists cold_plunge_logs_user_created_idx on public.cold_plunge_logs (user_id, created_at desc);
+create index if not exists recovery_logs_user_created_idx on public.recovery_logs (user_id, created_at desc);
 create index if not exists daily_checkins_user_created_idx on public.daily_checkins (user_id, created_at desc);

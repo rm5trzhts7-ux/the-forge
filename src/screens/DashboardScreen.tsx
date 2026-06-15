@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
-import { ColdPlungeLog, DailyCheckIn, SaunaLog, TabKey, WorkoutLog } from "../types/logs";
+import { DailyCheckIn, RecoveryLog, TabKey, WorkoutLog } from "../types/logs";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "home", label: "Home" },
@@ -31,15 +31,13 @@ const forgeTips = [
 
 type DashboardData = {
   workouts: WorkoutLog[];
-  saunas: SaunaLog[];
-  plunges: ColdPlungeLog[];
+  recovery: RecoveryLog[];
   checkins: DailyCheckIn[];
 };
 
 const emptyData: DashboardData = {
   workouts: [],
-  saunas: [],
-  plunges: [],
+  recovery: [],
   checkins: []
 };
 
@@ -54,16 +52,15 @@ export function DashboardScreen({ session }: { session: Session }) {
     const since = new Date();
     since.setDate(since.getDate() - 7);
 
-    const [workouts, saunas, plunges, checkins] = await Promise.all([
+    const [workouts, recovery, checkins] = await Promise.all([
       supabase.from("workout_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
-      supabase.from("sauna_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
-      supabase.from("cold_plunge_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("recovery_logs").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
       supabase.from("daily_checkins").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: false })
     ]);
 
     setRefreshing(false);
 
-    const firstError = workouts.error || saunas.error || plunges.error || checkins.error;
+    const firstError = workouts.error || recovery.error || checkins.error;
     if (firstError) {
       Alert.alert("Could not load logs", firstError.message);
       return;
@@ -71,8 +68,7 @@ export function DashboardScreen({ session }: { session: Session }) {
 
     setData({
       workouts: (workouts.data ?? []) as WorkoutLog[],
-      saunas: (saunas.data ?? []) as SaunaLog[],
-      plunges: (plunges.data ?? []) as ColdPlungeLog[],
+      recovery: (recovery.data ?? []) as RecoveryLog[],
       checkins: (checkins.data ?? []) as DailyCheckIn[]
     });
   }, []);
@@ -238,8 +234,10 @@ function RecoveryForms({
       return;
     }
 
-    const saved = await saveRow("sauna_logs", {
+    const saved = await saveRow("recovery_logs", {
+      recovery_type: "sauna",
       duration_minutes: Number(saunaDuration),
+      temperature: null,
       notes: saunaNotes.trim() || null
     });
     if (saved) {
@@ -254,7 +252,8 @@ function RecoveryForms({
       return;
     }
 
-    const saved = await saveRow("cold_plunge_logs", {
+    const saved = await saveRow("recovery_logs", {
+      recovery_type: "cold_plunge",
       duration_minutes: Number(plungeDuration),
       temperature: Number(temperature),
       notes: plungeNotes.trim() || null
@@ -376,8 +375,12 @@ function MiniAction({ title, onPress }: { title: string; onPress: () => void }) 
 
 function buildStats(data: DashboardData) {
   const volume = data.workouts.reduce((total, log) => total + Number(log.sets) * Number(log.reps) * Number(log.weight), 0);
-  const saunaMinutes = data.saunas.reduce((total, log) => total + Number(log.duration_minutes), 0);
-  const plungeMinutes = data.plunges.reduce((total, log) => total + Number(log.duration_minutes), 0);
+  const saunaMinutes = data.recovery
+    .filter((log) => log.recovery_type === "sauna")
+    .reduce((total, log) => total + Number(log.duration_minutes), 0);
+  const plungeMinutes = data.recovery
+    .filter((log) => log.recovery_type === "cold_plunge")
+    .reduce((total, log) => total + Number(log.duration_minutes), 0);
   const avgEnergy = average(data.checkins.map((log) => log.energy));
   const avgSleep = average(data.checkins.map((log) => log.sleep));
   const avgSoreness = average(data.checkins.map((log) => log.soreness));

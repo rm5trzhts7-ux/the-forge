@@ -11,19 +11,12 @@ export type WorkoutLog = {
   created_at: string;
 };
 
-export type SaunaLog = {
+export type RecoveryLog = {
   id: string;
   user_id: string;
+  recovery_type: "sauna" | "cold_plunge";
   duration_minutes: number;
-  notes: string | null;
-  created_at: string;
-};
-
-export type ColdPlungeLog = {
-  id: string;
-  user_id: string;
-  duration_minutes: number;
-  temperature: number;
+  temperature: number | null;
   notes: string | null;
   created_at: string;
 };
