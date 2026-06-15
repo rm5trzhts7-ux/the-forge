@@ -1,7 +1,7 @@
 import { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StatusBar, StyleSheet, View } from "react-native";
-import { colors } from "./src/components/ui";
+import { StatusBar } from "react-native";
+import { LoadingScreen } from "./src/components/LoadingScreen";
 import { supabase } from "./src/lib/supabase";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -27,10 +27,10 @@ export default function App() {
 
   if (loading) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator color={colors.accent} size="large" />
+      <>
+        <LoadingScreen />
         <StatusBar barStyle="light-content" />
-      </View>
+      </>
     );
   }
 
@@ -41,12 +41,3 @@ export default function App() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  loading: {
-    alignItems: "center",
-    backgroundColor: colors.bg,
-    flex: 1,
-    justifyContent: "center"
-  }
-});

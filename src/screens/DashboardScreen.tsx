@@ -13,6 +13,7 @@ import {
   View
 } from "react-native";
 import Svg, { Circle, G, Line, Polyline, Rect, Text as SvgText } from "react-native-svg";
+import { LoadingScreen } from "../components/LoadingScreen";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
 import { DailyCheckIn, MacroLog, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
@@ -88,6 +89,7 @@ const emptyData: DashboardData = {
 export function DashboardScreen({ session }: { session: Session }) {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [data, setData] = useState<DashboardData>(emptyData);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -111,6 +113,7 @@ export function DashboardScreen({ session }: { session: Session }) {
     const firstError = workouts.error || restPeriods.error || recovery.error || checkins.error || macros.error;
     if (firstError) {
       setErrorMessage(firstError.message);
+      setInitialLoading(false);
       Alert.alert("Could not load logs", firstError.message);
       return;
     }
@@ -123,6 +126,7 @@ export function DashboardScreen({ session }: { session: Session }) {
       checkins: (checkins.data ?? []) as DailyCheckIn[],
       macros: (macros.data ?? []) as MacroLog[]
     });
+    setInitialLoading(false);
   }, []);
 
   useEffect(() => {
@@ -133,6 +137,10 @@ export function DashboardScreen({ session }: { session: Session }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+  }
+
+  if (initialLoading) {
+    return <LoadingScreen />;
   }
 
   async function saveRow(table: string, values: Record<string, string | number | null>) {
@@ -294,7 +302,7 @@ export function DashboardScreen({ session }: { session: Session }) {
               <Text style={styles.errorText}>{errorMessage}</Text>
             </View>
           ) : null}
-          {activeTab === "home" ? <Home stats={stats} setActiveTab={setActiveTab} openDetail={setSelectedDetail} /> : null}
+          {activeTab === "home" ? <Home data={data} stats={stats} setActiveTab={setActiveTab} openDetail={setSelectedDetail} /> : null}
           {activeTab === "workout" ? <WorkoutForm saving={saving} saveWorkout={saveWorkout} /> : null}
           {activeTab === "recovery" ? <RecoveryForms saving={saving} saveRow={saveRow} /> : null}
           {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
@@ -328,42 +336,92 @@ export function DashboardScreen({ session }: { session: Session }) {
 }
 
 function Home({
+  data,
   stats,
   setActiveTab,
   openDetail
 }: {
+  data: DashboardData;
   stats: ReturnType<typeof buildStats>;
   setActiveTab: (tab: TabKey) => void;
   openDetail: (detail: DetailKey) => void;
 }) {
+  const today = dateKey(new Date());
+  const todayCheckIn = data.checkins.find((log) => dateKey(new Date(log.created_at)) === today);
+  const todayMacro = data.macros.find((log) => log.logged_date === today);
+  const latestWorkout = data.workouts[0];
+  const suggestedAction = getSuggestedAction(Boolean(todayCheckIn), Boolean(todayMacro), Boolean(latestWorkout));
+
   return (
     <View style={styles.stack}>
-      <SectionTitle title="Dashboard" subtitle="Your last 7 days of work, recovery, and readiness." />
-      <View style={styles.statGrid}>
-        <StatCard label="Workouts" value={stats.workouts} onPress={() => openDetail("workouts")} />
-        <StatCard label="Volume" value={`${stats.volume} lb`} onPress={() => openDetail("volume")} />
-        <StatCard label="Sauna" value={`${stats.saunaMinutes} min`} onPress={() => openDetail("sauna")} />
-        <StatCard label="Cold" value={`${stats.plungeMinutes} min`} onPress={() => openDetail("cold")} />
-        <StatCard label="Avg rest" value={stats.avgRestTime} onPress={() => openDetail("avgRest")} />
+      <SectionTitle title="Command Center" subtitle="What should you do today?" />
+
+      <Card>
+        <View style={styles.homeCardHeader}>
+          <Text style={styles.homeEyebrow}>Readiness</Text>
+          <Text style={styles.homeDate}>Today</Text>
+        </View>
+        {todayCheckIn ? (
+          <>
+            <Text style={styles.homeHeroValue}>Energy {todayCheckIn.energy}/10</Text>
+            <Text style={styles.cardCopy}>
+              Sleep {todayCheckIn.sleep}/10 | Soreness {todayCheckIn.soreness}/10 | Motivation {todayCheckIn.motivation}/10
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.homeHeroValue}>No signal yet</Text>
+            <Text style={styles.cardCopy}>Start with a quick check-in so today's plan matches your body.</Text>
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <View style={styles.homeCardHeader}>
+          <Text style={styles.homeEyebrow}>Macros</Text>
+          <Pressable onPress={() => openDetail("macroCalories")}>
+            <Text style={styles.homeLink}>History</Text>
+          </Pressable>
+        </View>
+        {todayMacro ? (
+          <View style={styles.homeMetricRow}>
+            <HomeMetric label="Calories" value={String(todayMacro.calories)} />
+            <HomeMetric label="Protein" value={`${todayMacro.protein_g}g`} />
+            <HomeMetric label="Weight" value={`${todayMacro.body_weight_lb} lb`} />
+          </View>
+        ) : (
+          <>
+            <Text style={styles.homeHeroValue}>Macros open</Text>
+            <Text style={styles.cardCopy}>Log calories, protein, water, sodium, and body weight for today.</Text>
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <Text style={styles.homeEyebrow}>Next Move</Text>
+        {latestWorkout ? (
+          <>
+            <Text style={styles.homeHeroValue}>{latestWorkout.exercise}</Text>
+            <Text style={styles.cardCopy}>
+              Last logged {formatDate(latestWorkout.created_at)} | {latestWorkout.sets} x {latestWorkout.reps} at {latestWorkout.weight} lb
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.homeHeroValue}>{suggestedAction.title}</Text>
+            <Text style={styles.cardCopy}>{suggestedAction.copy}</Text>
+          </>
+        )}
+      </Card>
+
+      <View style={styles.homeActions}>
+        <MiniAction title="Log Workout" onPress={() => setActiveTab("workout")} />
+        <MiniAction title="Log Recovery" onPress={() => setActiveTab("recovery")} />
+        <MiniAction title="Check In" onPress={() => setActiveTab("checkin")} />
+        <MiniAction title="Log Macros" onPress={() => setActiveTab("macros")} />
       </View>
-      <Card>
-        <Text style={styles.cardTitle}>Today</Text>
-        <Text style={styles.cardCopy}>{stats.insight}</Text>
-        <View style={styles.quickActions}>
-          <MiniAction title="Log workout" onPress={() => setActiveTab("workout")} />
-          <MiniAction title="Log recovery" onPress={() => setActiveTab("recovery")} />
-          <MiniAction title="Check in" onPress={() => setActiveTab("checkin")} />
-        </View>
-      </Card>
-      <Card>
-        <Text style={styles.cardTitle}>Macro Summary</Text>
-        <View style={styles.statGrid}>
-          <StatCard label="Today calories" value={stats.todayCalories} onPress={() => openDetail("macroCalories")} />
-          <StatCard label="Today protein" value={stats.todayProtein} onPress={() => openDetail("macroProtein")} />
-          <StatCard label="Body weight" value={stats.todayBodyWeight} onPress={() => openDetail("macroWeight")} />
-          <StatCard label="Avg calories" value={stats.avgCalories} onPress={() => openDetail("macroCalories")} />
-        </View>
-      </Card>
+
+      <Text style={styles.homeInsight}>{stats.insight}</Text>
     </View>
   );
 }
@@ -1573,6 +1631,43 @@ function MiniAction({ title, onPress }: { title: string; onPress: () => void }) 
   );
 }
 
+function HomeMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.homeMetric}>
+      <Text style={styles.homeMetricValue}>{value}</Text>
+      <Text style={styles.homeMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function getSuggestedAction(hasCheckIn: boolean, hasMacros: boolean, hasWorkout: boolean) {
+  if (!hasCheckIn) {
+    return {
+      title: "Check in first",
+      copy: "Capture energy, sleep, soreness, and motivation before choosing the day's load."
+    };
+  }
+
+  if (!hasMacros) {
+    return {
+      title: "Set the fuel",
+      copy: "Log macros early so training and recovery have a real target."
+    };
+  }
+
+  if (!hasWorkout) {
+    return {
+      title: "Log the work",
+      copy: "Start with the first lift and let the rest timer keep the session honest."
+    };
+  }
+
+  return {
+    title: "Recover with intent",
+    copy: "Round out the day with sauna, cold plunge, or a note your future self can use."
+  };
+}
+
 function buildChartData(data: DashboardData) {
   const days = lastSevenDays();
 
@@ -1900,6 +1995,70 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22
   },
+  homeCardHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  homeEyebrow: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase"
+  },
+  homeDate: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  homeLink: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  homeHeroValue: {
+    color: colors.text,
+    fontSize: 26,
+    fontWeight: "900",
+    lineHeight: 31
+  },
+  homeMetricRow: {
+    flexDirection: "row",
+    gap: 10
+  },
+  homeMetric: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    padding: 12
+  },
+  homeMetricValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  homeMetricLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 4,
+    textTransform: "uppercase"
+  },
+  homeActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10
+  },
+  homeInsight: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    textAlign: "center"
+  },
   quickActions: {
     gap: 10
   },
@@ -1908,6 +2067,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 8,
     borderWidth: 1,
+    flexGrow: 1,
+    minWidth: "47%",
     padding: 13
   },
   miniActionText: {
