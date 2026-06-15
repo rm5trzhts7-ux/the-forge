@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { supabase } from "../lib/supabase";
 import { colors, Field, PrimaryButton } from "../components/ui";
 
@@ -36,68 +36,84 @@ export function AuthScreen() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.screen}>
-      <View style={styles.hero}>
-        <Text style={styles.kicker}>THE FORGE</Text>
-        <Text style={styles.title}>Train hard. Recover colder. Track everything.</Text>
-        <Text style={styles.copy}>
-          A stripped-down command center for lifting, sauna, cold plunge, and daily readiness.
-        </Text>
-      </View>
-
-      <View style={styles.authCard}>
-        <View style={styles.formHeader}>
-          <Text style={styles.formTitle}>{mode === "login" ? "Welcome back" : "Start forging"}</Text>
-          <Text style={styles.formSubtitle}>
-            {mode === "login" ? "Log in to continue tracking your work." : "Create your account and start logging."}
+      <ScrollView
+        bounces={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.hero}>
+          <Text style={styles.kicker}>THE FORGE</Text>
+          <Text style={styles.title}>Train hard. Recover colder. Track everything.</Text>
+          <Text style={styles.copy}>
+            A stripped-down command center for lifting, sauna, cold plunge, and daily readiness.
           </Text>
         </View>
 
-        <View style={styles.switcher}>
-          <Pressable
-            onPress={() => setMode("login")}
-            style={[styles.switchButton, mode === "login" && styles.switchButtonActive]}
-          >
-            <Text style={[styles.switchText, mode === "login" && styles.switchTextActive]}>Login</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setMode("signup")}
-            style={[styles.switchButton, mode === "signup" && styles.switchButtonActive]}
-          >
-            <Text style={[styles.switchText, mode === "signup" && styles.switchTextActive]}>Sign up</Text>
-          </Pressable>
-        </View>
+        <View style={styles.authCard}>
+          <View style={styles.formHeader}>
+            <Text style={styles.formTitle}>{mode === "login" ? "Welcome back" : "Start forging"}</Text>
+            <Text style={styles.formSubtitle}>
+              {mode === "login" ? "Log in to continue tracking your work." : "Create your account and start logging."}
+            </Text>
+          </View>
 
-        <Field
-          autoCapitalize="none"
-          autoComplete="email"
-          autoCorrect={false}
-          containerStyle={styles.authField}
-          inputStyle={styles.authInput}
-          keyboardType="email-address"
-          label="Email address"
-          onChangeText={setEmail}
-          placeholder="you@example.com"
-          textContentType="emailAddress"
-          value={email}
-        />
-        <Field
-          autoCapitalize="none"
-          autoCorrect={false}
-          containerStyle={styles.authField}
-          inputStyle={styles.authInput}
-          label="Password"
-          onChangeText={setPassword}
-          placeholder="Minimum 6 characters"
-          secureTextEntry
-          textContentType={mode === "login" ? "password" : "newPassword"}
-          value={password}
-        />
-        <PrimaryButton
-          loading={loading}
-          onPress={submit}
-          title={mode === "login" ? "Enter The Forge" : "Create Account"}
-        />
-      </View>
+          <View style={styles.switcher}>
+            <Pressable
+              onPress={() => setMode("login")}
+              style={[styles.switchButton, mode === "login" && styles.switchButtonActive]}
+            >
+              <Text style={[styles.switchText, mode === "login" && styles.switchTextActive]}>Login</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setMode("signup")}
+              style={[styles.switchButton, mode === "signup" && styles.switchButtonActive]}
+            >
+              <Text style={[styles.switchText, mode === "signup" && styles.switchTextActive]}>Sign up</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.fields}>
+            <Field
+              autoCapitalize="none"
+              autoComplete="email"
+              autoCorrect={false}
+              containerStyle={styles.authField}
+              inputStyle={styles.authInput}
+              keyboardType="email-address"
+              labelStyle={styles.authLabel}
+              label="Email"
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              placeholderTextColor="#b8b8c0"
+              textContentType="emailAddress"
+              value={email}
+            />
+            <Field
+              autoCapitalize="none"
+              autoCorrect={false}
+              containerStyle={styles.authField}
+              inputStyle={styles.authInput}
+              labelStyle={styles.authLabel}
+              label="Password"
+              onChangeText={setPassword}
+              placeholder="Enter your password"
+              placeholderTextColor="#b8b8c0"
+              secureTextEntry
+              textContentType={mode === "login" ? "password" : "newPassword"}
+              value={password}
+            />
+          </View>
+
+          <View style={styles.actions}>
+            <PrimaryButton
+              loading={loading}
+              onPress={submit}
+              title={mode === "login" ? "Enter The Forge" : "Create Account"}
+            />
+          </View>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -105,13 +121,18 @@ export function AuthScreen() {
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.bg,
-    flex: 1,
+    flex: 1
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: "center",
-    padding: 20
+    padding: 20,
+    paddingBottom: 32,
+    paddingTop: 32
   },
   hero: {
-    marginBottom: 24,
-    gap: 10
+    marginBottom: 28,
+    gap: 12
   },
   kicker: {
     color: colors.accent,
@@ -131,19 +152,19 @@ const styles = StyleSheet.create({
     lineHeight: 23
   },
   authCard: {
-    backgroundColor: "#121214",
-    borderColor: "#333337",
+    backgroundColor: "#111113",
+    borderColor: "#3f3f46",
     borderRadius: 8,
     borderWidth: 1,
-    gap: 18,
-    padding: 18,
+    padding: 20,
     shadowColor: "#000000",
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.32,
     shadowRadius: 24
   },
   formHeader: {
-    gap: 5
+    gap: 6,
+    marginBottom: 22
   },
   formTitle: {
     color: colors.text,
@@ -156,36 +177,53 @@ const styles = StyleSheet.create({
     lineHeight: 20
   },
   switcher: {
-    backgroundColor: colors.panelSoft,
+    backgroundColor: "#202024",
     borderRadius: 8,
     flexDirection: "row",
-    padding: 4
+    marginBottom: 28,
+    padding: 5
   },
   switchButton: {
     alignItems: "center",
     borderRadius: 7,
     flex: 1,
-    paddingVertical: 10
+    minHeight: 48,
+    justifyContent: "center",
+    paddingVertical: 12
   },
   switchButtonActive: {
     backgroundColor: colors.accent
   },
   switchText: {
     color: colors.muted,
+    fontSize: 15,
     fontWeight: "800"
   },
   switchTextActive: {
     color: "#111111"
   },
+  fields: {
+    gap: 22,
+    marginBottom: 30
+  },
   authField: {
-    gap: 8
+    gap: 10
+  },
+  authLabel: {
+    color: "#e4e4e7",
+    fontSize: 14,
+    letterSpacing: 0.8
   },
   authInput: {
-    backgroundColor: "#202024",
-    borderColor: "#4a4a50",
+    backgroundColor: "#252529",
+    borderColor: "#686871",
     borderWidth: 1.5,
-    fontSize: 17,
-    minHeight: 56,
-    paddingHorizontal: 14
+    fontSize: 18,
+    minHeight: 64,
+    paddingHorizontal: 16,
+    paddingVertical: 14
+  },
+  actions: {
+    marginTop: 2
   }
 });

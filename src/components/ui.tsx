@@ -2,11 +2,14 @@ import { ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TextInputProps,
-  View
+  TextStyle,
+  View,
+  ViewStyle
 } from "react-native";
 
 export const colors = {
@@ -39,15 +42,17 @@ export function Field({
   label,
   containerStyle,
   inputStyle,
+  labelStyle,
   ...props
 }: TextInputProps & {
   label: string;
-  containerStyle?: object;
-  inputStyle?: object;
+  containerStyle?: StyleProp<ViewStyle>;
+  inputStyle?: StyleProp<TextStyle>;
+  labelStyle?: StyleProp<TextStyle>;
 }) {
   return (
     <View style={[styles.field, containerStyle]}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, labelStyle]}>{label}</Text>
       <TextInput
         placeholderTextColor="#71717a"
         style={[styles.input, props.multiline ? styles.textArea : null, inputStyle]}
