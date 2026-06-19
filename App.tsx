@@ -1,23 +1,33 @@
 import { Session } from "@supabase/supabase-js";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "react-native";
 import { LoadingScreen } from "./src/components/LoadingScreen";
 import { supabase } from "./src/lib/supabase";
 import { AuthScreen } from "./src/screens/AuthScreen";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 
+void SplashScreen.preventAutoHideAsync();
+
+SplashScreen.setOptions({
+  duration: 450,
+  fade: true
+});
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [dashboardReady, setDashboardReady] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
-      setLoading(false);
+      setAuthChecked(true);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      setDashboardReady(false);
     });
 
     return () => {
@@ -25,7 +35,18 @@ export default function App() {
     };
   }, []);
 
-  if (loading) {
+  const appReady = authChecked && (!session || dashboardReady);
+  const handleDashboardReady = useCallback(() => {
+    setDashboardReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (appReady) {
+      void SplashScreen.hideAsync();
+    }
+  }, [appReady]);
+
+  if (!authChecked) {
     return (
       <>
         <LoadingScreen />
@@ -36,7 +57,7 @@ export default function App() {
 
   return (
     <>
-      {session ? <DashboardScreen session={session} /> : <AuthScreen />}
+      {session ? <DashboardScreen onInitialLoadComplete={handleDashboardReady} session={session} /> : <AuthScreen />}
       <StatusBar barStyle="light-content" />
     </>
   );

@@ -5,19 +5,61 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#050505",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "splash": {
+      "image": "./assets/splash-forge.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#050505"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "splash": {
+        "image": "./assets/splash-forge.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#050505"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0b0b0d"
+        "backgroundColor": "#050505",
+        "foregroundImage": "./assets/splash-forge.png"
+      },
+      "splash": {
+        "image": "./assets/splash-forge.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#050505"
       }
     },
     "web": {
       "bundler": "metro"
-    }
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#050505",
+          "image": "./assets/splash-forge.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#050505",
+            "image": "./assets/splash-forge.png"
+          },
+          "ios": {
+            "backgroundColor": "#050505",
+            "image": "./assets/splash-forge.png",
+            "imageWidth": 180
+          },
+          "android": {
+            "backgroundColor": "#050505",
+            "image": "./assets/splash-forge.png",
+            "imageWidth": 180
+          }
+        }
+      ]
+    ]
   }
 }

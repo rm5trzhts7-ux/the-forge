@@ -1,4 +1,4 @@
-export type TabKey = "home" | "workout" | "recovery" | "checkin" | "macros" | "stats";
+export type TabKey = "home" | "workout" | "recovery" | "checkin" | "macros" | "stats" | "coaching";
 
 export type WorkoutLog = {
   id: string;
@@ -55,4 +55,23 @@ export type MacroLog = {
   notes: string | null;
   logged_date: string;
   created_at: string;
+};
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: "coach" | "client" | "both";
+  created_at: string;
+};
+
+export type CoachClientLink = {
+  id: string;
+  coach_id: string;
+  client_id: string | null;
+  status: "pending" | "accepted" | "rejected" | "revoked";
+  invited_email: string;
+  created_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
 };

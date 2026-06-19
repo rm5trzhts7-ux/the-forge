@@ -16,7 +16,7 @@ import Svg, { Circle, G, Line, Polyline, Rect, Text as SvgText } from "react-nat
 import { LoadingScreen } from "../components/LoadingScreen";
 import { Card, colors, Field, PrimaryButton, SectionTitle, StatCard } from "../components/ui";
 import { supabase } from "../lib/supabase";
-import { DailyCheckIn, MacroLog, RecoveryLog, RestPeriod, TabKey, WorkoutLog } from "../types/logs";
+import { CoachClientLink, DailyCheckIn, MacroLog, RecoveryLog, RestPeriod, TabKey, UserProfile, WorkoutLog } from "../types/logs";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "home", label: "Home" },
@@ -24,7 +24,8 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "recovery", label: "Recovery" },
   { key: "checkin", label: "Check-in" },
   { key: "macros", label: "Macros" },
-  { key: "stats", label: "Stats" }
+  { key: "stats", label: "Stats" },
+  { key: "coaching", label: "Coach" }
 ];
 
 const forgeTips = [
@@ -86,7 +87,13 @@ const emptyData: DashboardData = {
   macros: []
 };
 
-export function DashboardScreen({ session }: { session: Session }) {
+export function DashboardScreen({
+  onInitialLoadComplete,
+  session
+}: {
+  onInitialLoadComplete?: () => void;
+  session: Session;
+}) {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [data, setData] = useState<DashboardData>(emptyData);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -114,6 +121,7 @@ export function DashboardScreen({ session }: { session: Session }) {
     if (firstError) {
       setErrorMessage(firstError.message);
       setInitialLoading(false);
+      onInitialLoadComplete?.();
       Alert.alert("Could not load logs", firstError.message);
       return;
     }
@@ -127,7 +135,8 @@ export function DashboardScreen({ session }: { session: Session }) {
       macros: (macros.data ?? []) as MacroLog[]
     });
     setInitialLoading(false);
-  }, []);
+    onInitialLoadComplete?.();
+  }, [onInitialLoadComplete]);
 
   useEffect(() => {
     loadData();
@@ -308,6 +317,7 @@ export function DashboardScreen({ session }: { session: Session }) {
           {activeTab === "checkin" ? <CheckInForm saving={saving} saveRow={saveRow} /> : null}
           {activeTab === "macros" ? <MacroForm macros={data.macros} saving={saving} saveMacro={saveMacro} /> : null}
           {activeTab === "stats" ? <StatsPanel data={data} stats={stats} openDetail={setSelectedDetail} /> : null}
+          {activeTab === "coaching" ? <CoachingScreen session={session} /> : null}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -789,6 +799,388 @@ function MacroForm({
         <Field label="Notes" multiline onChangeText={setNotes} value={notes} placeholder="Training day, appetite, meals..." />
         <PrimaryButton loading={saving} onPress={submit} title="Save Macros" />
       </Card>
+    </View>
+  );
+}
+
+function CoachingScreen({ session }: { session: Session }) {
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [links, setLinks] = useState<CoachClientLink[]>([]);
+  const [profilesById, setProfilesById] = useState<Record<string, UserProfile>>({});
+  const [clientData, setClientData] = useState<DashboardData | null>(null);
+  const [selectedClient, setSelectedClient] = useState<UserProfile | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const userEmail = session.user.email?.toLowerCase() ?? "";
+
+  const loadCoaching = useCallback(async () => {
+    setLoading(true);
+    const { data: profileRow, error: profileError } = await supabase
+      .from("user_profiles")
+      .upsert({ id: session.user.id, email: userEmail }, { onConflict: "id" })
+      .select("*")
+      .single();
+
+    if (profileError) {
+      setErrorMessage(profileError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: linkRows, error: linksError } = await supabase
+      .from("coach_client_links")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (linksError) {
+      setErrorMessage(linksError.message);
+      setLoading(false);
+      return;
+    }
+
+    const profileIds = Array.from(
+      new Set(
+        ((linkRows ?? []) as CoachClientLink[])
+          .flatMap((link) => [link.coach_id, link.client_id])
+          .filter((id): id is string => Boolean(id))
+          .filter((id) => id !== session.user.id)
+      )
+    );
+
+    let profileLookup: Record<string, UserProfile> = {};
+    if (profileIds.length > 0) {
+      const { data: relatedProfiles, error: relatedProfilesError } = await supabase
+        .from("user_profiles")
+        .select("*")
+        .in("id", profileIds);
+
+      if (relatedProfilesError) {
+        setErrorMessage(relatedProfilesError.message);
+        setLoading(false);
+        return;
+      }
+
+      profileLookup = ((relatedProfiles ?? []) as UserProfile[]).reduce<Record<string, UserProfile>>((lookup, item) => {
+        lookup[item.id] = item;
+        return lookup;
+      }, {});
+    }
+
+    setErrorMessage("");
+    setProfile(profileRow as UserProfile);
+    setLinks((linkRows ?? []) as CoachClientLink[]);
+    setProfilesById(profileLookup);
+    setLoading(false);
+  }, [session.user.id, userEmail]);
+
+  useEffect(() => {
+    loadCoaching();
+  }, [loadCoaching]);
+
+  async function updateRole(role: UserProfile["role"]) {
+    setSaving(true);
+    const { error } = await supabase.from("user_profiles").update({ role }).eq("id", session.user.id);
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Profile update failed", error.message);
+      return;
+    }
+
+    await loadCoaching();
+  }
+
+  async function inviteClient() {
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    if (!normalizedEmail.includes("@")) {
+      Alert.alert("Check invite", "Enter a valid client email.");
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await supabase.from("coach_client_links").insert({
+      coach_id: session.user.id,
+      invited_email: normalizedEmail,
+      status: "pending"
+    });
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Invite failed", error.message);
+      return;
+    }
+
+    setInviteEmail("");
+    setErrorMessage("");
+    await loadCoaching();
+  }
+
+  async function updateInvite(link: CoachClientLink, status: "accepted" | "rejected" | "revoked") {
+    const values =
+      status === "accepted"
+        ? { status, client_id: session.user.id, accepted_at: new Date().toISOString() }
+        : status === "rejected"
+          ? { status, client_id: session.user.id }
+          : { status, revoked_at: new Date().toISOString() };
+
+    setSaving(true);
+    const { error } = await supabase.from("coach_client_links").update(values).eq("id", link.id);
+    setSaving(false);
+
+    if (error) {
+      setErrorMessage(error.message);
+      Alert.alert("Coaching update failed", error.message);
+      return;
+    }
+
+    setErrorMessage("");
+    await loadCoaching();
+  }
+
+  async function openClient(client: UserProfile) {
+    setSelectedClient(client);
+    setClientLoading(true);
+    setClientData(null);
+    const since = new Date();
+    since.setDate(since.getDate() - 7);
+
+    const [workouts, restPeriods, recovery, checkins, macros] = await Promise.all([
+      supabase.from("workout_logs").select("*").eq("user_id", client.id).gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("rest_periods").select("*").eq("user_id", client.id).gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("recovery_logs").select("*").eq("user_id", client.id).gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("daily_checkins").select("*").eq("user_id", client.id).gte("created_at", since.toISOString()).order("created_at", { ascending: false }),
+      supabase.from("macro_logs").select("*").eq("user_id", client.id).gte("logged_date", dateKey(since)).order("logged_date", { ascending: false })
+    ]);
+
+    setClientLoading(false);
+
+    const firstError = workouts.error || restPeriods.error || recovery.error || checkins.error || macros.error;
+    if (firstError) {
+      setErrorMessage(firstError.message);
+      Alert.alert("Client logs failed to load", firstError.message);
+      return;
+    }
+
+    setErrorMessage("");
+    setClientData({
+      workouts: (workouts.data ?? []) as WorkoutLog[],
+      restPeriods: (restPeriods.data ?? []) as RestPeriod[],
+      recovery: (recovery.data ?? []) as RecoveryLog[],
+      checkins: (checkins.data ?? []) as DailyCheckIn[],
+      macros: (macros.data ?? []) as MacroLog[]
+    });
+  }
+
+  const pendingInvites = links.filter((link) => link.status === "pending" && link.invited_email.toLowerCase() === userEmail);
+  const connectedCoaches = links.filter((link) => link.status === "accepted" && link.client_id === session.user.id);
+  const connectedClients = links.filter((link) => link.status === "accepted" && link.coach_id === session.user.id && link.client_id);
+  const sentInvites = links.filter((link) => link.coach_id === session.user.id);
+  const canCoach = profile?.role === "coach" || profile?.role === "both";
+  const canClient = profile?.role === "client" || profile?.role === "both";
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  return (
+    <View style={styles.stack}>
+      <SectionTitle title="Coaching" subtitle="Connect with coaches or clients for read-only accountability." />
+      {errorMessage ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorTitle}>Supabase error</Text>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      ) : null}
+
+      <Card>
+        <Text style={styles.cardTitle}>Your Role</Text>
+        <Text style={styles.cardCopy}>Choose how you use The Forge. You can coach, be coached, or do both.</Text>
+        <View style={styles.roleGrid}>
+          <RoleButton active={profile?.role === "client"} title="Client" onPress={() => updateRole("client")} />
+          <RoleButton active={profile?.role === "coach"} title="Coach" onPress={() => updateRole("coach")} />
+          <RoleButton active={profile?.role === "both"} title="Both" onPress={() => updateRole("both")} />
+        </View>
+      </Card>
+
+      {canClient ? (
+        <Card>
+          <Text style={styles.cardTitle}>Client Access</Text>
+          {pendingInvites.length === 0 ? <Text style={styles.cardCopy}>No pending coach invites.</Text> : null}
+          {pendingInvites.map((link) => (
+            <View key={link.id} style={styles.coachingItem}>
+              <View style={styles.logHeaderText}>
+                <Text style={styles.logTitle}>{profilesById[link.coach_id]?.email ?? "Coach invite"}</Text>
+                <Text style={styles.logDate}>Wants read-only access to your logs.</Text>
+              </View>
+              <View style={styles.logActions}>
+                <Pressable disabled={saving} onPress={() => updateInvite(link, "accepted")} style={styles.secondaryAction}>
+                  <Text style={styles.secondaryActionText}>Accept</Text>
+                </Pressable>
+                <Pressable disabled={saving} onPress={() => updateInvite(link, "rejected")} style={styles.deleteAction}>
+                  <Text style={styles.deleteActionText}>Reject</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+          {connectedCoaches.length > 0 ? <Text style={styles.homeEyebrow}>Connected Coaches</Text> : null}
+          {connectedCoaches.map((link) => (
+            <View key={link.id} style={styles.coachingItem}>
+              <View style={styles.logHeaderText}>
+                <Text style={styles.logTitle}>{profilesById[link.coach_id]?.email ?? "Connected coach"}</Text>
+                <Text style={styles.logDate}>Read-only access granted.</Text>
+              </View>
+              <Pressable disabled={saving} onPress={() => updateInvite(link, "revoked")} style={styles.deleteAction}>
+                <Text style={styles.deleteActionText}>Remove Access</Text>
+              </Pressable>
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
+      {canCoach ? (
+        <Card>
+          <Text style={styles.cardTitle}>Coach Tools</Text>
+          <Field
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            label="Invite client by email"
+            onChangeText={setInviteEmail}
+            placeholder="client@example.com"
+            placeholderTextColor="#b8b8c0"
+            value={inviteEmail}
+          />
+          <PrimaryButton loading={saving} onPress={inviteClient} title="Send Coach Invite" />
+
+          <Text style={styles.homeEyebrow}>Connected Clients</Text>
+          {connectedClients.length === 0 ? <Text style={styles.cardCopy}>No accepted clients yet.</Text> : null}
+          {connectedClients.map((link) => {
+            const client = link.client_id ? profilesById[link.client_id] : null;
+            return (
+              <Pressable
+                key={link.id}
+                onPress={() => client && openClient(client)}
+                style={({ pressed }) => [styles.coachingItem, pressed && styles.coachingItemPressed]}
+              >
+                <Text style={styles.logTitle}>{client?.display_name || client?.email || link.invited_email}</Text>
+                <Text style={styles.logDate}>Tap to view read-only client dashboard</Text>
+              </Pressable>
+            );
+          })}
+
+          <Text style={styles.homeEyebrow}>Invites Sent</Text>
+          {sentInvites.length === 0 ? <Text style={styles.cardCopy}>No invites sent yet.</Text> : null}
+          {sentInvites.map((link) => (
+            <View key={link.id} style={styles.inviteRow}>
+              <Text style={styles.logRowValue}>{link.invited_email}</Text>
+              <Text style={styles.statusPill}>{link.status}</Text>
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
+      {selectedClient ? (
+        <ClientDashboard
+          client={selectedClient}
+          data={clientData}
+          loading={clientLoading}
+          onClose={() => {
+            setSelectedClient(null);
+            setClientData(null);
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function RoleButton({ active, onPress, title }: { active: boolean; onPress: () => void; title: string }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.roleButton, active && styles.roleButtonActive]}>
+      <Text style={[styles.roleButtonText, active && styles.roleButtonTextActive]}>{title}</Text>
+    </Pressable>
+  );
+}
+
+function ClientDashboard({
+  client,
+  data,
+  loading,
+  onClose
+}: {
+  client: UserProfile;
+  data: DashboardData | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const stats = useMemo(() => buildStats(data ?? emptyData), [data]);
+  const charts = useMemo(() => buildChartData(data ?? emptyData), [data]);
+
+  return (
+    <Card>
+      <View style={styles.homeCardHeader}>
+        <View>
+          <Text style={styles.homeEyebrow}>Client Dashboard</Text>
+          <Text style={styles.cardTitle}>{client.display_name || client.email}</Text>
+        </View>
+        <Pressable onPress={onClose} style={styles.modalClose}>
+          <Text style={styles.modalCloseText}>Close</Text>
+        </Pressable>
+      </View>
+
+      {loading ? (
+        <Text style={styles.cardCopy}>Loading client logs...</Text>
+      ) : data ? (
+        <>
+          <View style={styles.statGrid}>
+            <StatCard label="Workouts" value={stats.workouts} />
+            <StatCard label="Volume" value={`${stats.volume} lb`} />
+            <StatCard label="Sauna" value={`${stats.saunaMinutes} min`} />
+            <StatCard label="Cold" value={`${stats.plungeMinutes} min`} />
+            <StatCard label="Avg energy" value={stats.avgEnergy} />
+            <StatCard label="Avg rest" value={stats.avgRestTime} />
+          </View>
+          <ChartCard title="Training Trend" subtitle="Client volume over the last 7 days" points={charts.trainingVolume} variant="bar" unit="lb" />
+          <ChartCard
+            title="Readiness Trend"
+            subtitle="Energy and sleep over the last 7 days"
+            points={charts.readinessScores}
+            variant="line"
+            unit="/10"
+            primaryLabel="Energy"
+            secondaryLabel="Sleep"
+          />
+          <LogPreview title="Training Logs" empty="No workouts this week." rows={data.workouts.map((log) => `${log.exercise} | ${log.sets} x ${log.reps} @ ${log.weight} lb`)} />
+          <LogPreview
+            title="Recovery Logs"
+            empty="No recovery sessions this week."
+            rows={data.recovery.map((log) => `${log.recovery_type === "sauna" ? "Sauna" : "Cold plunge"} | ${log.duration_minutes} min`)}
+          />
+          <LogPreview title="Check-ins" empty="No check-ins this week." rows={data.checkins.map((log) => `Energy ${log.energy}/10 | Sleep ${log.sleep}/10 | Soreness ${log.soreness}/10`)} />
+          <LogPreview title="Macro Logs" empty="No macro logs this week." rows={data.macros.map((log) => `${log.logged_date} | ${log.calories} cal | ${log.protein_g}g protein`)} />
+        </>
+      ) : (
+        <Text style={styles.cardCopy}>Select a client to load their read-only dashboard.</Text>
+      )}
+    </Card>
+  );
+}
+
+function LogPreview({ empty, rows, title }: { empty: string; rows: string[]; title: string }) {
+  return (
+    <View style={styles.previewBlock}>
+      <Text style={styles.homeEyebrow}>{title}</Text>
+      {rows.length === 0 ? <Text style={styles.cardCopy}>{empty}</Text> : null}
+      {rows.slice(0, 5).map((row, index) => (
+        <View key={`${title}-${index}`} style={styles.previewRow}>
+          <Text style={styles.logRowValue}>{row}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -2058,6 +2450,70 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 19,
     textAlign: "center"
+  },
+  roleGrid: {
+    flexDirection: "row",
+    gap: 10
+  },
+  roleButton: {
+    alignItems: "center",
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 12
+  },
+  roleButtonActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent
+  },
+  roleButtonText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "900",
+    textTransform: "uppercase"
+  },
+  roleButtonTextActive: {
+    color: "#111111"
+  },
+  coachingItem: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+    padding: 12
+  },
+  coachingItemPressed: {
+    borderColor: colors.accent,
+    opacity: 0.82
+  },
+  inviteRow: {
+    alignItems: "center",
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: 12
+  },
+  statusPill: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase"
+  },
+  previewBlock: {
+    gap: 8
+  },
+  previewRow: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10
   },
   quickActions: {
     gap: 10
